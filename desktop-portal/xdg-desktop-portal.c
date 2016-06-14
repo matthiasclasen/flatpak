@@ -23,6 +23,7 @@ static struct {
   GDBusNodeInfo *info;
 } portal_interfaces [] = {
   { "org.freedesktop.portal.FileChooser" },
+  { "org.freedesktop.portal.AppChooser" },
   { NULL }
 };
 

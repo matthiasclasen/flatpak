@@ -6,6 +6,8 @@ introspection_DATA = \
 	data/org.freedesktop.impl.portal.PermissionStore.xml \
 	data/org.freedesktop.portal.FileChooser.xml \
 	data/org.freedesktop.impl.portal.FileChooser.xml \
+	data/org.freedesktop.portal.AppChooser.xml \
+	data/org.freedesktop.impl.portal.AppChooser.xml \
 	data/org.freedesktop.portal.Documents.xml \
 	data/org.freedesktop.Flatpak.xml \
 	$(NULL)
