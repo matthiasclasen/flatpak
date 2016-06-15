@@ -227,6 +227,120 @@ find_portal (const char *interface)
   return NULL;
 }
 
+static GVariant *
+transform_value (const char *interface_name,
+                 const char *signal_name,
+                 int pos,
+                 GVariant *parameters)
+{
+  GVariant *arg;
+  GVariant *ret;
+  GVariant *options;
+  gboolean writable;
+
+  arg = g_variant_get_child_value (parameters, pos);
+
+  if (strcmp (interface_name, "org.freedesktop.impl.portal.FileChooser") != 0 ||
+      pos != 2)
+    return arg;
+
+  options = g_variant_get_child_value (parameters, 3);
+  g_variant_lookup (options, "writable", "b", &writable);
+
+  if (strcmp (signal_name, "OpenFilesResponse") == 0)
+    {
+      GVariantBuilder ret_builder;
+      const char **uris;
+      gsize size;
+      int i;
+
+      uris = g_variant_get_strv (arg, &size);
+      g_variant_builder_init (&ret_builder, G_VARIANT_TYPE ("as"));
+      for (i = 0; i < size; i++)
+        g_variant_builder_add (&ret_builder, register_uri (uris[i], writable));
+      ret = g_variant_builder_end (&ret_builder);
+    }
+  else
+    {
+      const char *uri;
+
+      uri = g_variant_get_string (arg);
+      ret = g_variant_new_string (register_uri (uri, writable));
+    }
+
+  g_variant_unref (arg);
+
+  return ret;
+}
+
+typedef struct {
+  GDBusConnection *connection;
+  char *sender_name;
+  char *object_path;
+  char *signal_name;
+
+  char *destination;
+  char *handle;
+  guint32 response;
+  GVariant *options;
+
+  gboolean writable;
+  GSList *uris;
+  GSList *registered_uris;
+} FileChooserSignalData;
+
+static void
+handle_filecooser_backend_signal (GDBusConnection  *connection,
+                                  const gchar      *sender_name,
+                                  const gchar      *object_path,
+                                  const gchar      *signal_name,
+                                  GVariant         *parameters,
+                                  gpointer          user_data)
+{
+  FileChooserSignalData *data;
+  GVariant *options;
+  gboolean writable;
+
+  data = g_new0 (FileChooserSignalData, 1);
+
+  data->connection = g_object_ref (connection);
+  data->sender_name = g_strdup (sender_name);
+  data->object_path = g_strdup (object_path);
+  data->signal_name = g_strdup (signal_name);
+
+  g_variant_get_child (parameters, 0, "s", &data->destination);
+  g_variant_get_child (parameters, 1, "o", &data->handle);
+  g_variant_get_child (parameters, 2, "u", &data->response);
+  g_variant_get_child_value (parameters, 3, &data->options);
+
+  data->writable = FALSE;
+  data->uris = NULL;
+  data->registered_uris = NULL;
+
+  if (g_variant_lookup (options, "b", "writable", &writable))
+    data->writable = writable;
+
+  if (strcmp (signal_name, "OpenFilesResponse") == 0)
+    {
+      const char **uris;
+      int i;
+
+      g_variant_get_child (parameters, "^a&s", &uris);
+      for (i = 0; uris[i]; i++)
+        g_slist_prepend (data->uris, g_strdup (uris[i]));
+    }
+  else
+    {
+      const char *uri;
+      g_variant_get_child (parameters, "&s", &uri);
+      g_slist_prepend (data->uris, g_strdup (uris[i]));
+
+      if (strcmp (signal_name, "SaveFileResponse") == 0)
+        {
+        }
+    }
+}
+
 static void
 handle_backend_signal (GDBusConnection  *connection,
                        const gchar      *sender_name,
@@ -242,13 +356,24 @@ handle_backend_signal (GDBusConnection  *connection,
   GError *error = NULL;
   char *real_interface_name;
 
+  if (strcmp (interface_name, "org.freedesktop.impl.portal.FileChooser") == 0)
+    {
+      g_print ("use GTask");
+      handle_filechooser_backend_signal (connection, sender_name, object_path,
+                                         interface_name, signal_name, parameters,
+                                         user_data);
+      return;
+    }
+
   g_variant_get_child (parameters, 0, "&s", &destination);
 
   /* Strip out destination */
   n_children = g_variant_n_children (parameters);
   g_variant_builder_init (&b, G_VARIANT_TYPE_TUPLE);
   for (i = 1; i < n_children; i++)
-    g_variant_builder_add_value (&b, g_variant_get_child_value (parameters, i));
+    {
+      g_variant_builder_add_value (&b, transform_value (interface_name, signal_name, i, parameters));
+    }
 
   if (g_str_has_prefix (interface_name, "org.freedesktop.impl.portal."))
     real_interface_name = g_strconcat ("org.freedesktop.portal.", interface_name + strlen ("org.freedesktop.impl.portal."), NULL);
