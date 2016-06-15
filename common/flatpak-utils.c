@@ -1106,6 +1106,24 @@ got_credentials_cb (GObject      *source_object,
     g_hash_table_remove (app_ids, info->name);
 }
 
+typedef struct {
+  GObject *source;
+  GAsyncReadyCallback callback;
+  gpointer user_data;
+} AppIdData;
+
+static void
+lookup_callback (GObject *source,
+                 GAsyncResult *result,
+                 gpointer user_data)
+{
+  AppIdData *data = user_data;
+
+  data->callback (data->source, result, data->user_data);
+  g_object_unref (data->source);
+  g_free (data);
+}
+
 void
 flatpak_invocation_lookup_app_id (GDBusMethodInvocation *invocation,
                                   GCancellable          *cancellable,
@@ -1114,11 +1132,27 @@ flatpak_invocation_lookup_app_id (GDBusMethodInvocation *invocation,
 {
   GDBusConnection *connection = g_dbus_method_invocation_get_connection (invocation);
   const gchar *sender = g_dbus_method_invocation_get_sender (invocation);
+  AppIdData *data;
 
+  data = g_new (AppIdData, 1);
+  data->source = g_object_ref (invocation);
+  data->callback = callback;
+  data->user_data = user_data;
+
+  flatpak_connection_lookup_app_id (connection, sender, cancellable, lookup_callback, data);
+}
+
+void
+flatpak_connection_lookup_app_id (GDBusConnection       *connection,
+                                  const char            *sender,
+                                  GCancellable          *cancellable,
+                                  GAsyncReadyCallback    callback,
+                                  gpointer               user_data)
+{
   g_autoptr(GTask) task = NULL;
   AppIdInfo *info;
 
-  task = g_task_new (invocation, cancellable, callback, user_data);
+  task = g_task_new (connection, cancellable, callback, user_data);
 
   ensure_app_ids ();
 
@@ -1163,8 +1197,20 @@ flatpak_invocation_lookup_app_id_finish (GDBusMethodInvocation *invocation,
                                          GAsyncResult          *result,
                                          GError               **error)
 {
+  GDBusConnection *connection = g_dbus_method_invocation_get_connection (invocation);
+
+  return flatpak_connection_lookup_app_id_finish (connection, result, error);
+}
+
+
+char *
+flatpak_connection_lookup_app_id_finish (GDBusConnection       *connection,
+                                         GAsyncResult          *result,
+                                         GError               **error)
+{
   return g_task_propagate_pointer (G_TASK (result), error);
 }
+
 
 static void
 name_owner_changed (GDBusConnection *connection,
@@ -1181,6 +1227,7 @@ name_owner_changed (GDBusConnection *connection,
 
   ensure_app_ids ();
 
+g_print ("name owner changed for: %s from %s to %s\n", name, from, to);
   if (name[0] == ':' &&
       strcmp (name, from) == 0 &&
       strcmp (to, "") == 0)
@@ -1190,6 +1237,7 @@ name_owner_changed (GDBusConnection *connection,
       if (info != NULL)
         {
           info->exited = TRUE;
+g_print ("set info->exited\n");
           if (info->pending == NULL)
             g_hash_table_remove (app_ids, name);
         }

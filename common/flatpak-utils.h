@@ -116,6 +116,16 @@ char *flatpak_invocation_lookup_app_id_finish (GDBusMethodInvocation *invocation
                                                GAsyncResult          *result,
                                                GError               **error);
 
+void  flatpak_connection_lookup_app_id (GDBusConnection       *connection,
+                                        const char            *sender,
+                                        GCancellable          *cancellable,
+                                        GAsyncReadyCallback    callback,
+                                        gpointer               user_data);
+
+char *flatpak_connection_lookup_app_id_finish (GDBusConnection  *connection,
+                                               GAsyncResult     *result,
+                                               GError          **error);
+
 void  flatpak_connection_track_name_owners (GDBusConnection *connection);
 
 #if !GLIB_CHECK_VERSION (2, 40, 0)
