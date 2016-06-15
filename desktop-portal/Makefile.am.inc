@@ -18,6 +18,23 @@ DISTCLEANFILES += desktop-portal/org.freedesktop.portal.Desktop.service
 
 EXTRA_DIST += desktop-portal/xdg-desktop-portal.gresource.xml
 
+xdp_dbus_built_sources = xdp-dbus.c xdp-dbus.h
+BUILT_SOURCES += $(xdp_dbus_built_sources)
+
+$(xdp_dbus_built_sources) : $(DBUS_SERVICE_DIR)/../interfaces/org.freedesktop.portal.Documents.xml
+	$(AM_V_GEN) $(GDBUS_CODEGEN)                            \
+		--interface-prefix org.freedesktop.portal.      \
+		--c-namespace XdpDbus                           \
+		--generate-c-code $(builddir)/xdp-dbus          \
+		--annotate "org.freedesktop.portal.Documents.Add()" "org.gtk.GDBus.C.UnixFD" "true" \
+		--annotate "org.freedesktop.portal.Documents.AddNamed()" "org.gtk.GDBus.C.UnixFD" "true" \
+		$(DBUS_SERVICE_DIR)/../interfaces/org.freedesktop.portal.Documents.xml     \
+		$(NULL)
+
+nodist_xdg_desktop_portal_SOURCES = \
+	$(xdp_dbus_built_sources)		\
+	$(NULL)
+
 xdg_desktop_portal_SOURCES = \
 	desktop-portal/xdg-desktop-portal.c	\
 	desktop-portal/xdg-desktop-resources.c	\

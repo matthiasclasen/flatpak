@@ -5,9 +5,15 @@
 #include <string.h>
 
 #include <gio/gio.h>
+#include <gio/gunixfdlist.h>
+
 #include "flatpak-utils.h"
+#include "xdp-dbus.h"
+
 
 static GMainLoop *loop = NULL;
+static XdpDbusDocuments *documents = NULL;
+static char *mountpoint = NULL;
 
 static gboolean opt_verbose;
 static gboolean opt_replace;
@@ -227,118 +233,228 @@ find_portal (const char *interface)
   return NULL;
 }
 
-static GVariant *
-transform_value (const char *interface_name,
-                 const char *signal_name,
-                 int pos,
-                 GVariant *parameters)
-{
-  GVariant *arg;
-  GVariant *ret;
-  GVariant *options;
-  gboolean writable;
-
-  arg = g_variant_get_child_value (parameters, pos);
-
-  if (strcmp (interface_name, "org.freedesktop.impl.portal.FileChooser") != 0 ||
-      pos != 2)
-    return arg;
-
-  options = g_variant_get_child_value (parameters, 3);
-  g_variant_lookup (options, "writable", "b", &writable);
-
-  if (strcmp (signal_name, "OpenFilesResponse") == 0)
-    {
-      GVariantBuilder ret_builder;
-      const char **uris;
-      gsize size;
-      int i;
-
-      uris = g_variant_get_strv (arg, &size);
-      g_variant_builder_init (&ret_builder, G_VARIANT_TYPE ("as"));
-      for (i = 0; i < size; i++)
-        g_variant_builder_add (&ret_builder, register_uri (uris[i], writable));
-      ret = g_variant_builder_end (&ret_builder);
-    }
-  else
-    {
-      const char *uri;
-
-      uri = g_variant_get_string (arg);
-      ret = g_variant_new_string (register_uri (uri, writable));
-    }
-
-  g_variant_unref (arg);
-
-  return ret;
-}
-
 typedef struct {
   GDBusConnection *connection;
   char *sender_name;
   char *object_path;
   char *signal_name;
-
-  char *destination;
-  char *handle;
-  guint32 response;
-  GVariant *options;
-
-  gboolean writable;
-  GSList *uris;
-  GSList *registered_uris;
-} FileChooserSignalData;
+  char *app_id;
+  GVariant *parameters;
+} FileResponseData;
 
 static void
-handle_filecooser_backend_signal (GDBusConnection  *connection,
-                                  const gchar      *sender_name,
-                                  const gchar      *object_path,
-                                  const gchar      *signal_name,
-                                  GVariant         *parameters,
-                                  gpointer          user_data)
+file_response_data_free (FileResponseData *data)
 {
-  FileChooserSignalData *data;
+  g_object_unref (data->connection);
+  g_free (data->sender_name);
+  g_free (data->object_path);
+  g_free (data->signal_name);
+  g_free (data->app_id);
+  g_variant_unref (data->parameters);
+
+  g_free (data);
+}
+
+static char *
+register_document (const char *uri,
+                   gboolean for_save,
+                   const char *app_id,
+                   gboolean writable,
+                   GError **error)
+{
+  g_autofree char *doc_id = NULL;
+  g_autofree char *path = NULL;
+  g_autofree char *basename = NULL;
+  g_autofree char *dirname = NULL;
+  GUnixFDList *fd_list = NULL;
+  int fd, fd_in;
+  g_autoptr(GFile) file = NULL;
+  gboolean ret = FALSE;
+  const char *permissions[5];
+  g_autofree char *fuse_path = NULL;
+  int i;
+
+  if (app_id == NULL)
+    return g_strdup (uri);
+
+  file = g_file_new_for_uri (uri);
+  path = g_file_get_path (file);
+  basename = g_path_get_basename (path);
+  dirname = g_path_get_dirname (path);
+
+  if (for_save)
+    fd = open (dirname, O_PATH | O_CLOEXEC);
+  else
+    fd = open (path, O_PATH | O_CLOEXEC);
+
+  if (fd == -1)
+    {
+      g_set_error (error, G_IO_ERROR, g_io_error_from_errno (errno),
+                   "Failed to open %s", uri);
+      return NULL;
+    }
+
+  fd_list = g_unix_fd_list_new ();
+  fd_in = g_unix_fd_list_append (fd_list, fd, error);
+  close (fd);
+
+  if (fd_in == -1)
+    return NULL;
+
+  i = 0;
+  permissions[i++] = "read";
+  if (writable)
+    permissions[i++] = "write";
+  permissions[i++] = "grant";
+  permissions[i++] = NULL;
+
+  if (for_save)
+    ret = xdp_dbus_documents_call_add_named_sync (documents,
+                                                  g_variant_new_handle (fd_in),
+                                                  basename,
+                                                  TRUE,
+                                                  TRUE,
+                                                  fd_list,
+                                                  &doc_id,
+                                                  NULL,
+                                                  NULL,
+                                                  error);
+  else
+    ret = xdp_dbus_documents_call_add_sync (documents,
+                                            g_variant_new_handle (fd_in),
+                                            TRUE,
+                                            TRUE,
+                                            fd_list,
+                                            &doc_id,
+                                            NULL,
+                                            NULL,
+                                            error);
+  g_object_unref (fd_list);
+
+  if (!ret)
+    return NULL;
+
+  if (!xdp_dbus_documents_call_grant_permissions_sync (documents,
+                                                       doc_id,
+                                                       app_id,
+                                                       permissions,
+                                                       NULL,
+                                                       error))
+    return NULL;
+
+  return g_build_filename (mountpoint, doc_id, basename, NULL);
+}
+
+static void
+send_filechooser_response (GTask *task,
+                           gpointer source,
+                           gpointer task_data,
+                           GCancellable *cancellable)
+{
+  FileResponseData *data = task_data;
+  GVariantBuilder b;
+  const char *handle;
+  guint32 response;
   GVariant *options;
   gboolean writable;
+  gboolean for_save;
+  GError *error = NULL;
+  const char *destination;
 
-  data = g_new0 (FileChooserSignalData, 1);
+  g_print ("%s", g_variant_print (data->parameters, FALSE));
+  g_variant_get_child (data->parameters, 0, "&s", &destination);
+  g_variant_get_child (data->parameters, 1, "&o", &handle);
+  g_variant_get_child (data->parameters, 2, "u", &response);
+  options = g_variant_get_child_value (data->parameters, 4);
 
-  data->connection = g_object_ref (connection);
-  data->sender_name = g_strdup (sender_name);
-  data->object_path = g_strdup (object_path);
-  data->signal_name = g_strdup (signal_name);
+  if (strcmp (data->signal_name, "SaveFileResponse") == 0)
+    for_save = TRUE;
+  else
+    for_save = FALSE;
 
-  g_variant_get_child (parameters, 0, "s", &data->destination);
-  g_variant_get_child (parameters, 1, "o", &data->handle);
-  g_variant_get_child (parameters, 2, "u", &data->response);
-  g_variant_get_child_value (parameters, 3, &data->options);
+  if (strcmp (data->signal_name, "SaveFileResponse") == 0)
+    writable = TRUE;
+  else if (!g_variant_lookup (options, "b", "writable", &writable))
+    writable = FALSE;
 
-  data->writable = FALSE;
-  data->uris = NULL;
-  data->registered_uris = NULL;
+  g_variant_builder_init (&b, G_VARIANT_TYPE_TUPLE);
+  g_variant_builder_add (&b, "s", handle);
+  g_variant_builder_add (&b, "u", response);
 
-  if (g_variant_lookup (options, "b", "writable", &writable))
-    data->writable = writable;
-
-  if (strcmp (signal_name, "OpenFilesResponse") == 0)
+  if (strcmp (data->signal_name, "OpenFilesResponse") == 0)
     {
+      GVariantBuilder a;
       const char **uris;
       int i;
 
-      g_variant_get_child (parameters, "^a&s", &uris);
+      g_variant_builder_init (&a, G_VARIANT_TYPE ("as"));
+      g_variant_get_child (data->parameters, 3, "^a&s", &uris);
       for (i = 0; uris[i]; i++)
-        g_slist_prepend (data->uris, g_strdup (uris[i]));
+        {
+          g_autofree char *ruri = NULL;
+
+          ruri = register_document (uris[i], for_save, data->app_id, writable, &error);
+          if (ruri == NULL)
+            {
+              g_warning ("Failed to register %s: %s\n", uris[i], error->message);
+              g_clear_error (&error);
+            }
+          else
+            {
+              g_print ("convert %s -> %s\n", uris[i], ruri);
+              g_variant_builder_add (&a, "s", ruri);
+            }
+        }
+
+      g_variant_builder_add (&b, "@as", g_variant_builder_end (&a));
     }
   else
     {
       const char *uri;
-      g_variant_get_child (parameters, "&s", &uri);
-      g_slist_prepend (data->uris, g_strdup (uris[i]));
+      g_autofree char *ruri = NULL;
 
-      if (strcmp (signal_name, "SaveFileResponse") == 0)
+      g_variant_get_child (data->parameters, 3, "&s", &uri);
+      ruri = register_document (uri, for_save, data->app_id, writable, &error);
+      if (ruri == NULL)
         {
+          g_warning ("Failed to register %s: %s\n", uri, error->message);
+          g_clear_error (&error);
+        }
+      else
+        {
+          g_print ("convert %s -> %s\n", uri, ruri);
+          g_variant_builder_add (&b, "s", ruri);
         }
     }
+
+  g_variant_builder_add (&b, "@a{sv}", options);
+
+  if (!g_dbus_connection_emit_signal (data->connection,
+                                      destination,
+                                      "/org/freedesktop/portal/desktop",
+                                      "org.freedesktop.portal.FileChooser",
+                                      data->signal_name,
+                                      g_variant_builder_end (&b),
+                                      &error))
+    {
+      g_warning ("Error emitting signal: %s\n", error->message);
+      g_error_free (error);
+    }
+}
+
+static void
+got_app_id_for_destination (GObject *source_object,
+                            GAsyncResult *res,
+                            gpointer user_data)
+{
+  FileResponseData *data = user_data;
+  g_autoptr(GTask) task = NULL;
+
+  data->app_id = flatpak_connection_lookup_app_id_finish (data->connection, res, NULL);
+
+  task = g_task_new (NULL, NULL, NULL, NULL);
+  g_task_set_task_data (task, data, (GDestroyNotify)file_response_data_free);
+  g_task_run_in_thread (task, send_filechooser_response);
 }
 
 static void
@@ -358,10 +474,21 @@ handle_backend_signal (GDBusConnection  *connection,
 
   if (strcmp (interface_name, "org.freedesktop.impl.portal.FileChooser") == 0)
     {
-      g_print ("use GTask");
-      handle_filechooser_backend_signal (connection, sender_name, object_path,
-                                         interface_name, signal_name, parameters,
-                                         user_data);
+      FileResponseData *data;
+
+      data = g_new0 (FileResponseData, 1);
+      data->connection = g_object_ref (connection);
+      data->sender_name = g_strdup (sender_name);
+      data->object_path = g_strdup (object_path);
+      data->signal_name = g_strdup (signal_name);
+      data->parameters = g_variant_ref (parameters);
+
+      g_variant_get_child (parameters, 0, "&s", &destination);
+      flatpak_connection_lookup_app_id (connection,
+                                        destination,
+                                        NULL,
+                                        got_app_id_for_destination,
+                                        data);
       return;
     }
 
@@ -371,9 +498,7 @@ handle_backend_signal (GDBusConnection  *connection,
   n_children = g_variant_n_children (parameters);
   g_variant_builder_init (&b, G_VARIANT_TYPE_TUPLE);
   for (i = 1; i < n_children; i++)
-    {
-      g_variant_builder_add_value (&b, transform_value (interface_name, signal_name, i, parameters));
-    }
+    g_variant_builder_add_value (&b, g_variant_get_child_value (parameters, i));
 
   if (g_str_has_prefix (interface_name, "org.freedesktop.impl.portal."))
     real_interface_name = g_strconcat ("org.freedesktop.portal.", interface_name + strlen ("org.freedesktop.impl.portal."), NULL);
@@ -530,6 +655,12 @@ on_bus_acquired (GDBusConnection *connection,
     }
 
   flatpak_connection_track_name_owners (connection);
+
+  documents = xdp_dbus_documents_proxy_new_sync (connection, 0,
+                                                 "org.freedesktop.portal.Documents",
+                                                 "/org/freedesktop/portal/documents",
+                                                 NULL, NULL);
+  xdp_dbus_documents_call_get_mount_point_sync (documents, &mountpoint, NULL, NULL);
 }
 
 static void
