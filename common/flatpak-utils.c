@@ -1044,7 +1044,9 @@ got_credentials_cb (GObject      *source_object,
   reply = g_dbus_connection_send_message_with_reply_finish (G_DBUS_CONNECTION (source_object),
                                                             res, &error);
 
-  if (!info->exited && reply != NULL)
+  if (!info->exited &&
+      reply != NULL &&
+      g_dbus_message_get_message_type (reply) != G_DBUS_MESSAGE_TYPE_ERROR)
     {
       GVariant *body = g_dbus_message_get_body (reply);
       guint32 pid;
