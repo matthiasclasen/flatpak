@@ -30,6 +30,7 @@ static struct {
 } portal_interfaces [] = {
   { "org.freedesktop.portal.FileChooser" },
   { "org.freedesktop.portal.AppChooser" },
+  { "org.freedesktop.portal.Print" },
   { NULL }
 };
 
