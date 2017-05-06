@@ -190,5 +190,23 @@
       <arg type='s' name='app_id' direction='in'/>
       <arg type='a{say}' name='docs' direction='out'/>
     </method>
+
+    <!--
+        AddMany:
+        @app_id: an application ID
+        @o_path_fds: open file descriptors for the files to export
+        @doc_ids: the document ids
+
+        Adds multiple files to the document store for the given application
+        and return the document ids. The files are exported with read and
+        write permissions, and not persistent. Only files that are not already
+        accessible to the application are exported, for others, "" is returned
+        instead of a document id.
+    -->
+    <method name="AddMany">
+      <arg type='s' name='app_id' direction='in'/>
+      <arg type='ah' name='o_path_fds' direction='in'/>
+      <arg type='as' name='doc_ids' direction='out'/>
+    </method>
   </interface>
 </node>
