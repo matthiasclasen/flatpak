@@ -581,7 +581,7 @@ portal_add_many (GDBusMethodInvocation *invocation,
   g_autoptr(GVariantIter) iter = NULL;
   g_auto(GStrv) ids = NULL;
   GKeyFile *app_info = g_object_get_data (G_OBJECT (invocation), "app-info");
-  int fd;
+  int idx;
   int i;
 
   g_variant_get (parameters, "(sah)", &for_app_id, &iter);
@@ -591,12 +591,19 @@ portal_add_many (GDBusMethodInvocation *invocation,
   ids = g_new0 (char *, g_unix_fd_list_get_length (fd_list)  + 1);
 
   i = 0;
-  while (g_variant_iter_next (iter, "h", &fd))
+  while (g_variant_iter_next (iter, "h", &idx))
     {
+      int fd;
       char *id;
       g_autoptr(GError) error = NULL;
 
       // FIXME find out if fd is visible for app for_app_id
+      fd = g_unix_fd_list_get (fd_list, idx, &error);
+      if (fd == -1)
+        {
+          g_dbus_method_invocation_return_gerror (invocation, error);
+          return;
+        }
       id = export_file (for_app_id, app_info, fd, FALSE, FALSE, &error);
       if (id == NULL)
         {
