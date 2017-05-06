@@ -452,40 +452,20 @@ validate_fd (int fd,
   return TRUE;
 }
 
-static void
-portal_add (GDBusMethodInvocation *invocation,
-            GVariant              *parameters,
-            const char            *app_id)
+static char *
+export_file (const char  *app_id,
+             GKeyFile    *app_info,
+             int          fd,
+             gboolean     reuse_existing,
+             gboolean     persistent,
+             GError     **error)
 {
-  GDBusMessage *message;
-  GUnixFDList *fd_list;
   g_autofree char *id = NULL;
-  int fd_id, fd, fds_len;
   char path_buffer[PATH_MAX + 1];
-  const int *fds;
   struct stat st_buf, real_parent_st_buf;
-  gboolean reuse_existing, persistent;
-  GError *error = NULL;
-  GKeyFile *app_info = g_object_get_data (G_OBJECT (invocation), "app-info");
 
-  g_variant_get (parameters, "(hbb)", &fd_id, &reuse_existing, &persistent);
-
-  message = g_dbus_method_invocation_get_message (invocation);
-  fd_list = g_dbus_message_get_unix_fd_list (message);
-
-  fd = -1;
-  if (fd_list != NULL)
-    {
-      fds = g_unix_fd_list_peek_fds (fd_list, &fds_len);
-      if (fd_id < fds_len)
-        fd = fds[fd_id];
-    }
-
-  if (!validate_fd (fd, app_info, &st_buf, &real_parent_st_buf, path_buffer, &error))
-    {
-      g_dbus_method_invocation_take_error (invocation, error);
-      return;
-    }
+  if (!validate_fd (fd, app_info, &st_buf, &real_parent_st_buf, path_buffer, error))
+    return NULL;
 
   if (st_buf.st_dev == fuse_dev)
     {
@@ -496,10 +476,10 @@ portal_add (GDBusMethodInvocation *invocation,
       g_debug ("path on fuse, id %s", id);
       if (id == NULL)
         {
-          g_dbus_method_invocation_return_error (invocation,
-                                                 FLATPAK_PORTAL_ERROR, FLATPAK_PORTAL_ERROR_INVALID_ARGUMENT,
-                                                 "Invalid fd passed");
-          return;
+          g_set_error (error,
+                       FLATPAK_PORTAL_ERROR, FLATPAK_PORTAL_ERROR_INVALID_ARGUMENT,
+                       "Invalid fd passed");
+          return NULL;
         }
 
       /* Don't lock the db before doing the fuse call above, because it takes takes a lock
@@ -513,13 +493,12 @@ portal_add (GDBusMethodInvocation *invocation,
        * revocations
        */
       old_entry = flatpak_db_lookup (db, id);
-      if (old_entry == NULL ||
-          !reuse_existing)
+      if (old_entry == NULL || !reuse_existing)
         {
-          g_dbus_method_invocation_return_error (invocation,
-                                                 FLATPAK_PORTAL_ERROR, FLATPAK_PORTAL_ERROR_INVALID_ARGUMENT,
-                                                 "Invalid fd passed");
-          return;
+          g_set_error (error,
+                       FLATPAK_PORTAL_ERROR, FLATPAK_PORTAL_ERROR_INVALID_ARGUMENT,
+                       "Invalid fd passed");
+          return NULL;
         }
     }
   else
@@ -539,8 +518,7 @@ portal_add (GDBusMethodInvocation *invocation,
             {
               entry = flatpak_db_lookup (db, id);
 
-              /* If its a unique one its safe for the creator to
-                 delete it at will */
+              /* If its a unique one its safe for the creator to delete it at will */
               if (!reuse_existing)
                 perms |= XDP_PERMISSION_FLAGS_DELETE;
 
@@ -555,8 +533,87 @@ portal_add (GDBusMethodInvocation *invocation,
         xdp_fuse_invalidate_doc_app (id, app_id);
     }
 
-  g_dbus_method_invocation_return_value (invocation,
-                                         g_variant_new ("(s)", id));
+  return g_steal_pointer (&id);
+}
+
+static void
+portal_add (GDBusMethodInvocation *invocation,
+            GVariant              *parameters,
+            const char            *app_id)
+{
+  GDBusMessage *message;
+  GUnixFDList *fd_list;
+  g_autofree char *id = NULL;
+  int fd_id, fd, fds_len;
+  const int *fds;
+  gboolean reuse_existing, persistent;
+  GError *error = NULL;
+  GKeyFile *app_info = g_object_get_data (G_OBJECT (invocation), "app-info");
+
+  g_variant_get (parameters, "(hbb)", &fd_id, &reuse_existing, &persistent);
+
+  message = g_dbus_method_invocation_get_message (invocation);
+  fd_list = g_dbus_message_get_unix_fd_list (message);
+
+  fd = -1;
+  if (fd_list != NULL)
+    {
+      fds = g_unix_fd_list_peek_fds (fd_list, &fds_len);
+      if (fd_id < fds_len)
+        fd = fds[fd_id];
+    }
+
+  id = export_file (app_id, app_info, fd, reuse_existing, persistent, &error);
+  if (id == NULL)
+    g_dbus_method_invocation_return_gerror (invocation, error);
+  else
+    g_dbus_method_invocation_return_value (invocation, g_variant_new ("(s)", id));
+}
+
+static void
+portal_add_many (GDBusMethodInvocation *invocation,
+                 GVariant              *parameters,
+                 const char            *app_id)
+{
+  GDBusMessage *message;
+  GUnixFDList *fd_list;
+  g_autofree char *for_app_id = NULL;
+  g_autoptr(GVariantIter) iter = NULL;
+  g_auto(GStrv) ids = NULL;
+  GKeyFile *app_info = g_object_get_data (G_OBJECT (invocation), "app-info");
+  int idx;
+  int i;
+
+  g_variant_get (parameters, "(sah)", &for_app_id, &iter);
+
+  message = g_dbus_method_invocation_get_message (invocation);
+  fd_list = g_dbus_message_get_unix_fd_list (message);
+  ids = g_new0 (char *, g_unix_fd_list_get_length (fd_list)  + 1);
+
+  i = 0;
+  while (g_variant_iter_next (iter, "h", &idx))
+    {
+      int fd;
+      char *id;
+      g_autoptr(GError) error = NULL;
+
+      // FIXME find out if fd is visible for app for_app_id
+      fd = g_unix_fd_list_get (fd_list, idx, &error);
+      if (fd == -1)
+        {
+          g_dbus_method_invocation_return_gerror (invocation, error);
+          return;
+        }
+      id = export_file (for_app_id, app_info, fd, FALSE, FALSE, &error);
+      if (id == NULL)
+        {
+          g_dbus_method_invocation_return_gerror (invocation, error);
+          return;
+        }
+      ids[i++] = id;
+    }
+
+  g_dbus_method_invocation_return_value (invocation, g_variant_new ("(^as)", ids));
 }
 
 static void
@@ -882,6 +939,7 @@ on_bus_acquired (GDBusConnection *connection,
   g_signal_connect_swapped (dbus_api, "handle-lookup", G_CALLBACK (handle_method), portal_lookup);
   g_signal_connect_swapped (dbus_api, "handle-info", G_CALLBACK (handle_method), portal_info);
   g_signal_connect_swapped (dbus_api, "handle-list", G_CALLBACK (handle_method), portal_list);
+  g_signal_connect_swapped (dbus_api, "handle-add-many", G_CALLBACK (handle_method), portal_add_many);
 
   flatpak_connection_track_name_owners (connection);
 
