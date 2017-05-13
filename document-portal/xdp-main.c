@@ -594,6 +594,7 @@ portal_add_many (GDBusMethodInvocation *invocation,
   while (g_variant_iter_next (iter, "h", &idx))
     {
       int fd;
+      char *id;
       g_autoptr(GError) error = NULL;
 
       // FIXME find out if fd is visible for app for_app_id
@@ -604,16 +605,17 @@ portal_add_many (GDBusMethodInvocation *invocation,
           return;
         }
 
-      ids[i++] = export_file (for_app_id, app_info, fd, FALSE, FALSE, &error);
-      if (ids[i++] == NULL)
+      id = export_file (for_app_id, app_info, fd, FALSE, FALSE, &error);
+      if (id == NULL)
         {
           g_dbus_method_invocation_return_gerror (invocation, error);
           return;
         }
+      ids[i++] = id;
     }
 
   g_dbus_method_invocation_return_value (invocation,
-                                         g_variant_new ("(^asay)", ids, xdp_fuse_get_mountpoint ()));
+                                         g_variant_new ("(^as^ay)", ids, xdp_fuse_get_mountpoint ()));
 }
 
 static void
