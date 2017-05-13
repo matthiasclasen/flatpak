@@ -594,26 +594,26 @@ portal_add_many (GDBusMethodInvocation *invocation,
   while (g_variant_iter_next (iter, "h", &idx))
     {
       int fd;
-      char *id;
       g_autoptr(GError) error = NULL;
 
       // FIXME find out if fd is visible for app for_app_id
       fd = g_unix_fd_list_get (fd_list, idx, &error);
-      if (fd == -1)
+      if (fd < 0)
         {
           g_dbus_method_invocation_return_gerror (invocation, error);
           return;
         }
-      id = export_file (for_app_id, app_info, fd, FALSE, FALSE, &error);
-      if (id == NULL)
+
+      ids[i++] = export_file (for_app_id, app_info, fd, FALSE, FALSE, &error);
+      if (ids[i++] == NULL)
         {
           g_dbus_method_invocation_return_gerror (invocation, error);
           return;
         }
-      ids[i++] = id;
     }
 
-  g_dbus_method_invocation_return_value (invocation, g_variant_new ("(^as)", ids));
+  g_dbus_method_invocation_return_value (invocation,
+                                         g_variant_new ("(^asay)", ids, xdp_fuse_get_mountpoint ()));
 }
 
 static void
@@ -929,6 +929,8 @@ on_bus_acquired (GDBusConnection *connection,
   GError *error = NULL;
 
   dbus_api = xdp_dbus_documents_skeleton_new ();
+
+  xdp_dbus_documents_set_version (XDP_DBUS_DOCUMENTS (dbus_api), 1);
 
   g_signal_connect_swapped (dbus_api, "handle-get-mount-point", G_CALLBACK (handle_get_mount_point), NULL);
   g_signal_connect_swapped (dbus_api, "handle-add", G_CALLBACK (handle_method), portal_add);
