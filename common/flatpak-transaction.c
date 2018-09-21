@@ -1820,6 +1820,7 @@ log_structured (FlatpakTransaction *self,
                 const char *func)
 {
   GLogField fields[] = {
+    { "MESSAGE_ID", MESSAGE_TRANSACTION, -1 },
     { "GLIB_DOMAIN", G_LOG_DOMAIN, -1 },
     { "PRIORITY", "5" /* Message */, -1 },
     { "CODE_FILE", file, -1 },
@@ -1828,6 +1829,7 @@ log_structured (FlatpakTransaction *self,
     { "MESSAGE", NULL , -1 },
     { "OPERATION", kind_to_str (op->kind), -1 },
     { "INSTALLATION", installation_name (self), -1 },
+    { "RESULT", error ? "0" : "1", -1 },
     { NULL, NULL, -1 }, /* REMOTE */
     { NULL, NULL, -1 }, /* REF */
     { NULL, NULL, -1 }, /* COMMIT */
@@ -1848,9 +1850,9 @@ log_structured (FlatpakTransaction *self,
                                (details & FLATPAK_TRANSACTION_RESULT_NO_CHANGE)
                                ? " (no change)" : "");
 
-  fields[5].value = message;
+  fields[6].value = message;
 
-  n_fields = 8;
+  n_fields = 10;
 
   if (op->remote)
     {

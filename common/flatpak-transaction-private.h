@@ -25,4 +25,6 @@
 
 #include "flatpak-dir-private.h"
 
+#define MESSAGE_TRANSACTION "c7b39b1e006b464599465e105b361485"
+
 #endif /* __FLATPAK_TRANSACTION_PRIVATE_H__ */
