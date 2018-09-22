@@ -56,7 +56,7 @@ static GOptionEntry options[] = {
 
 static Column all_columns[] = {
   { "time",         N_("Time"),           N_("Show when the change happend"),       1, 1 },
-  { "operation",    N_("Operation"),      N_("Show the kind of change"),            1, 1 },
+  { "change",       N_("Change"),         N_("Show the kind of change"),            1, 1 },
   { "ref",          N_("Ref"),            N_("Show the ref"),                       0, 0 },
   { "application",  N_("Application"),    N_("Show the application/runtime ID"),    1, 0 },
   { "arch",         N_("Architecture"),   N_("Show the architecture"),              1, 0 },
@@ -211,7 +211,7 @@ print_history (GPtrArray *dirs,
               s = g_date_time_format (time, "%X");
               flatpak_table_printer_add_column (printer, s);
             }
-          else if (strcmp (columns[k].name, "operation") == 0)
+          else if (strcmp (columns[k].name, "change") == 0)
             {
               g_autofree char *op = get_field (j, "OPERATION", error);
               if (*error)
