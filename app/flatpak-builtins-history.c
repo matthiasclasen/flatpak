@@ -58,15 +58,16 @@ static Column all_columns[] = {
   { "time",         N_("Time"),           N_("Show when the change happend"),       1, 1 },
   { "change",       N_("Change"),         N_("Show the kind of change"),            1, 1 },
   { "ref",          N_("Ref"),            N_("Show the ref"),                       0, 0 },
-  { "application",  N_("Application"),    N_("Show the application/runtime ID"),    1, 0 },
+  { "application",  N_("Application"),    N_("Show the application/runtime ID"),    1, 1 },
   { "arch",         N_("Architecture"),   N_("Show the architecture"),              1, 0 },
-  { "branch",       N_("Branch"),         N_("Show the branch"),                    1, 0 },
+  { "branch",       N_("Branch"),         N_("Show the branch"),                    1, 1 },
   { "installation", N_("Installation"),   N_("Show the affected installation"),     1, 1 },
   { "remote",       N_("Remote"),         N_("Show the remote"),                    1, 1 },
   { "commit",       N_("Commit"),         N_("Show the active commit"),             1, 0 },
   { "result",       N_("Result"),         N_("Show whether change was successful"), 1, 1 },
   { "user",         N_("User"),           N_("Show the user doing the change"),     1, 0 },
   { "tool",         N_("Tool"),           N_("Show the tool that was used"),        1, 0 },
+  { "version",      N_("Version"),        N_("Show the Flatpak version"),           1, 0 },
   { NULL }
 };
 
@@ -289,6 +290,13 @@ print_history (GPtrArray *dirs,
               if (*error)
                 return FALSE;
               flatpak_table_printer_add_column (printer, tool);
+            }
+          else if (strcmp (columns[k].name, "version") == 0)
+            {
+              g_autofree char *version = get_field (j, "FLATPAK_VERSION", error);
+              if (*error)
+                return FALSE;
+              flatpak_table_printer_add_column (printer, version);
             }
         }
 
