@@ -191,10 +191,10 @@ print_history (GPtrArray *dirs,
         {
           g_autoptr(GDateTime) time = get_time (j, NULL);
 
-          if (time && g_date_time_difference (since, time) >= 0)
+          if (since && time && g_date_time_difference (since, time) >= 0)
             continue;
 
-          if (time && g_date_time_difference (time, until) >= 0)
+          if (until && time && g_date_time_difference (until, time) <= 0)
             continue;
         }
 
