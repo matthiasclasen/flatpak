@@ -35,7 +35,10 @@
 #include "flatpak-table-printer.h"
 #include "flatpak-transaction-private.h"
 
+static char *opt_since;
+
 static GOptionEntry options[] = {
+  { "since", 0, 0, G_OPTION_ARG_STRING, &opt_since, N_("Show entries newer than TIME"), N_("TIME") },
   { NULL }
 };
 
@@ -56,6 +59,7 @@ dir_get_id (FlatpakDir *dir)
 
 static gboolean
 print_history (GPtrArray *dirs,
+               GDateTime *since,
                GCancellable *cancellable,
                GError **error)
 {
@@ -146,6 +150,9 @@ print_history (GPtrArray *dirs,
           t /= 1000000;
           dt = g_date_time_new_from_unix_local (t);
 
+          if (since && g_date_time_difference (since, dt) >= 0)
+            continue;
+
           s = g_date_time_format (dt, "%X");
           flatpak_table_printer_add_column (printer, s);
         }
@@ -187,11 +194,55 @@ print_history (GPtrArray *dirs,
   return TRUE;
 }
 
+static GDateTime *
+parse_since (const char *opt_since,
+             GError **error)
+{
+  g_autoptr (GDateTime) now = NULL;
+  g_auto(GStrv) parts = NULL;
+  int i;
+  int days = 0;
+  int hours = 0;
+  int minutes = 0;
+  int seconds = 0;
+
+  now = g_date_time_new_now_local ();
+
+  parts = g_strsplit (opt_since, " ", -1);
+
+  for (i = 0; parts[i]; i++)
+    {
+      gint64 n;
+      char *end;
+
+      n = g_ascii_strtoll (parts[i], &end, 10);
+      if (g_strcmp0 (end, "d") == 0 ||
+          g_strcmp0 (end, "day") == 0 ||
+          g_strcmp0 (end, "days") == 0)
+        days = (int) n;
+      else if (g_strcmp0 (end, "h") == 0 ||
+               g_strcmp0 (end, "hour") == 0 ||
+               g_strcmp0 (end, "hours") == 0)
+        hours = (int) n;
+      else if (g_strcmp0 (end, "m") == 0 ||
+               g_strcmp0 (end, "minute") == 0 ||
+               g_strcmp0 (end, "minutes") == 0)
+        minutes = (int) n;
+      else if (g_strcmp0 (end, "s") == 0 ||
+               g_strcmp0 (end, "second") == 0 ||
+               g_strcmp0 (end, "seconds") == 0)
+        seconds = (int) n;
+    }
+
+  return g_date_time_add_full (now, 0, 0, -days, -hours, -minutes, -seconds);
+}
+
 gboolean
 flatpak_builtin_history (int argc, char **argv, GCancellable *cancellable, GError **error)
 {
   g_autoptr(GOptionContext) context = NULL;
   g_autoptr(GPtrArray) dirs = NULL;
+  g_autoptr(GDateTime) since = NULL;
 
   context = g_option_context_new (_(" - Show history"));
   g_option_context_set_translation_domain (context, GETTEXT_PACKAGE);
@@ -204,7 +255,14 @@ flatpak_builtin_history (int argc, char **argv, GCancellable *cancellable, GErro
   if (argc > 1)
     return usage_error (context, _("Too many arguments"), error);
 
-  if (!print_history (dirs, cancellable, error))
+  if (opt_since)
+    {
+      since = parse_since (opt_since, error);
+      if (!since)
+        return FALSE;
+    }
+
+  if (!print_history (dirs, since, cancellable, error))
     return FALSE;
 
   return TRUE;
