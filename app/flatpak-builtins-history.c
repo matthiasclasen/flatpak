@@ -107,7 +107,7 @@ get_field (sd_journal *j,
       return NULL;
     }
 
-  return g_strdup (data + strlen (name) + 1);
+  return g_strndup (data + strlen (name) + 1, len - (strlen (name) + 1));
 }
 
 static GDateTime *
@@ -233,11 +233,11 @@ print_history (GPtrArray *dirs,
                 {
                   g_auto(GStrv) pref = flatpak_decompose_ref (ref, NULL);
                   if (strcmp (columns[k].name, "application") == 0)
-                    flatpak_table_printer_add_column (printer, pref[1]);
+                    flatpak_table_printer_add_column (printer, pref ? pref[1] : "");
                   else if (strcmp (columns[k].name, "arch") == 0)
-                    flatpak_table_printer_add_column (printer, pref[2]);
+                    flatpak_table_printer_add_column (printer, pref ? pref[2] : "");
                   else
-                    flatpak_table_printer_add_column (printer, pref[3]);
+                    flatpak_table_printer_add_column (printer, pref ? pref[3] : "");
                 }
             }
           else if (strcmp (columns[k].name, "installation") == 0)
