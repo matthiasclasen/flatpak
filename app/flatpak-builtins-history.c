@@ -47,8 +47,8 @@ static gboolean opt_show_cols;
 static const char **opt_cols;
 
 static GOptionEntry options[] = {
-  { "since", 0, 0, G_OPTION_ARG_STRING, &opt_since, N_("Show entries newer than TIME"), N_("TIME") },
-  { "until", 0, 0, G_OPTION_ARG_STRING, &opt_until, N_("Show entries older than TIME"), N_("TIME") },
+  { "since", 0, 0, G_OPTION_ARG_STRING, &opt_since, N_("Only show changes after TIME"), N_("TIME") },
+  { "until", 0, 0, G_OPTION_ARG_STRING, &opt_until, N_("Only show changes before TIME"), N_("TIME") },
   { "show-columns", 0, 0, G_OPTION_ARG_NONE, &opt_show_cols, N_("Show available columns"), NULL },
   { "columns", 0, 0, G_OPTION_ARG_STRING_ARRAY, &opt_cols, N_("What information to show"), N_("FIELD,…") },
   { NULL }
