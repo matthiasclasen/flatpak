@@ -1826,6 +1826,7 @@ log_structured (FlatpakTransaction *self,
     { "CODE_FILE", file, -1 },
     { "CODE_LINE", line, -1 },
     { "CODE_FUNC", func, -1 },
+    { "FLATPAK_VERSION", PACKAGE_VERSION, -1 },
     { "MESSAGE", NULL , -1 },
     { "OPERATION", kind_to_str (op->kind), -1 },
     { "INSTALLATION", installation_name (self), -1 },
@@ -1850,9 +1851,9 @@ log_structured (FlatpakTransaction *self,
                                (details & FLATPAK_TRANSACTION_RESULT_NO_CHANGE)
                                ? " (no change)" : "");
 
-  fields[6].value = message;
+  fields[7].value = message;
 
-  n_fields = 10;
+  n_fields = 11;
 
   if (op->remote)
     {
