@@ -42,11 +42,13 @@
 #include "flatpak-transaction-private.h"
 
 static char *opt_since;
+static char *opt_until;
 static gboolean opt_show_cols;
 static const char **opt_cols;
 
 static GOptionEntry options[] = {
   { "since", 0, 0, G_OPTION_ARG_STRING, &opt_since, N_("Show entries newer than TIME"), N_("TIME") },
+  { "until", 0, 0, G_OPTION_ARG_STRING, &opt_until, N_("Show entries older than TIME"), N_("TIME") },
   { "show-columns", 0, 0, G_OPTION_ARG_NONE, &opt_show_cols, N_("Show available columns"), NULL },
   { "columns", 0, 0, G_OPTION_ARG_STRING_ARRAY, &opt_cols, N_("What information to show"), N_("FIELD,…") },
   { NULL }
@@ -131,6 +133,7 @@ static gboolean
 print_history (GPtrArray *dirs,
                Column *columns,
                GDateTime *since,
+               GDateTime *until,
                GCancellable *cancellable,
                GError **error)
 {
@@ -183,11 +186,14 @@ print_history (GPtrArray *dirs,
             continue;
         }
 
-      if (since)
+      if (since || until)
         {
           g_autoptr(GDateTime) time = get_time (j, NULL);
 
           if (time && g_date_time_difference (since, time) >= 0)
+            continue;
+
+          if (time && g_date_time_difference (time, until) >= 0)
             continue;
         }
 
@@ -303,6 +309,7 @@ static gboolean
 print_history (GPtrArray *dirs,
                Column *columns,
                GDateTime *since,
+               GDateTime *until,
                GCancellable *cancellable,
                GError **error)
 {
@@ -313,7 +320,7 @@ print_history (GPtrArray *dirs,
 #endif
 
 static GDateTime *
-parse_since (const char *opt_since)
+parse_time (const char *opt_since)
 {
   g_autoptr (GDateTime) now = NULL;
   g_auto(GStrv) parts = NULL;
@@ -385,6 +392,7 @@ flatpak_builtin_history (int argc, char **argv, GCancellable *cancellable, GErro
   g_autoptr(GOptionContext) context = NULL;
   g_autoptr(GPtrArray) dirs = NULL;
   g_autoptr(GDateTime) since = NULL;
+  g_autoptr(GDateTime) until = NULL;
   g_autofree char *col_help = NULL;
   g_autofree Column *columns = NULL;
 
@@ -403,7 +411,7 @@ flatpak_builtin_history (int argc, char **argv, GCancellable *cancellable, GErro
 
   if (opt_since)
     {
-      since = parse_since (opt_since);
+      since = parse_time (opt_since);
       if (!since)
         {
           g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
@@ -412,13 +420,23 @@ flatpak_builtin_history (int argc, char **argv, GCancellable *cancellable, GErro
         }
     }
 
+  if (opt_until)
+    {
+      until = parse_time (opt_until);
+      if (!until)
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                       _("Failed to parse the --until option"));
+          return FALSE;
+        }
+    }
   columns = handle_column_args (all_columns,
                                 opt_show_cols, FALSE, opt_cols,
                                 error);
   if (columns == NULL)
     return FALSE;
 
-  if (!print_history (dirs, columns, since, cancellable, error))
+  if (!print_history (dirs, columns, since, until, cancellable, error))
     return FALSE;
 
   return TRUE;
