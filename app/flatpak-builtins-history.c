@@ -28,7 +28,12 @@
 #include <glib/gi18n.h>
 
 #include "libglnx/libglnx.h"
+
+#undef HAVE_LIBSYSTEMD
+
+#ifdef HAVE_LIBSYSTEMD
 #include <systemd/sd-journal.h>
+#endif
 
 #include "flatpak-builtins.h"
 #include "flatpak-utils-private.h"
@@ -41,6 +46,8 @@ static GOptionEntry options[] = {
   { "since", 0, 0, G_OPTION_ARG_STRING, &opt_since, N_("Show entries newer than TIME"), N_("TIME") },
   { NULL }
 };
+
+#ifdef HAVE_LIBSYSTEMD
 
 static const char *
 dir_get_id (FlatpakDir *dir)
@@ -193,6 +200,20 @@ print_history (GPtrArray *dirs,
   
   return TRUE;
 }
+
+#else
+
+static gboolean
+print_history (GPtrArray *dirs,
+               GDateTime *since,
+               GCancellable *cancellable,
+               GError **error)
+{
+  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "history not available without libsystemd");
+  return FALSE;
+}
+
+#endif
 
 static GDateTime *
 parse_since (const char *opt_since,
