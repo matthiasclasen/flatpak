@@ -98,7 +98,7 @@ get_field (sd_journal *j,
     {
       if (r != -ENOENT)
         g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                     "Failed to get journal data (%s): %s",
+                     _("Failed to get journal data (%s): %s"),
                      name, strerror (-r));
 
       return NULL;
@@ -112,12 +112,16 @@ get_time (sd_journal *j,
           GError **error)
 {
   g_autofree char *value = NULL;
+  GError *local_error = NULL;
   gint64 t;
 
-  value = get_field (j, "_SOURCE_REALTIME_TIMESTAMP", error);
+  value = get_field (j, "_SOURCE_REALTIME_TIMESTAMP", &local_error);
 
-  if (*error)
-    return NULL;
+  if (local_error)
+    {
+      g_propagate_error (error, local_error);
+      return NULL;
+    }
 
   t = g_ascii_strtoll (value, NULL, 10) / 1000000;
   return g_date_time_new_from_unix_local (t);
@@ -145,13 +149,15 @@ print_history (GPtrArray *dirs,
 
   if ((r = sd_journal_open (&j, 0)) < 0)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to open journal: %s", strerror (-r));
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   _("Failed to open journal: %s"), strerror (-r));
       return FALSE;
     }
 
   if ((r = sd_journal_add_match (j, "MESSAGE_ID=" MESSAGE_TRANSACTION, 0)) < 0)
     {
-      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to add match to journal: %s", strerror (-r));
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   _("Failed to add match to journal: %s"), strerror (-r));
       return FALSE;
     }
 
@@ -181,7 +187,7 @@ print_history (GPtrArray *dirs,
         {
           g_autoptr(GDateTime) time = get_time (j, NULL);
 
-          if (since && g_date_time_difference (since, time) >= 0)
+          if (time && g_date_time_difference (since, time) >= 0)
             continue;
         }
 
@@ -307,8 +313,7 @@ print_history (GPtrArray *dirs,
 #endif
 
 static GDateTime *
-parse_since (const char *opt_since,
-             GError **error)
+parse_since (const char *opt_since)
 {
   g_autoptr (GDateTime) now = NULL;
   g_auto(GStrv) parts = NULL;
@@ -317,8 +322,31 @@ parse_since (const char *opt_since,
   int hours = 0;
   int minutes = 0;
   int seconds = 0;
+  const char *fmts[] = {
+    "%H:%M",
+    "%H:%M:%S",
+    "%Y-%m-%d",
+    "%Y-%m-%d %H:%M:%S"
+  };
 
   now = g_date_time_new_now_local ();
+
+  for (i = 0; i < G_N_ELEMENTS(fmts); i++)
+    {
+      const char *rest;
+      struct tm tm;
+
+      tm.tm_year = g_date_time_get_year (now);
+      tm.tm_mon = g_date_time_get_month (now);
+      tm.tm_mday = g_date_time_get_day_of_month (now);
+      tm.tm_hour = 0;
+      tm.tm_min = 0;
+      tm.tm_sec = 0;
+
+      rest = strptime (opt_since, fmts[i], &tm);
+      if (rest && *rest == '\0')
+         return g_date_time_new_local (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+    }
 
   parts = g_strsplit (opt_since, " ", -1);
 
@@ -344,6 +372,8 @@ parse_since (const char *opt_since,
                g_strcmp0 (end, "second") == 0 ||
                g_strcmp0 (end, "seconds") == 0)
         seconds = (int) n;
+      else
+        return NULL;
     }
 
   return g_date_time_add_full (now, 0, 0, -days, -hours, -minutes, -seconds);
@@ -373,9 +403,13 @@ flatpak_builtin_history (int argc, char **argv, GCancellable *cancellable, GErro
 
   if (opt_since)
     {
-      since = parse_since (opt_since, error);
+      since = parse_since (opt_since);
       if (!since)
-        return FALSE;
+        {
+          g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                       _("Failed to parse the --since option"));
+          return FALSE;
+        }
     }
 
   columns = handle_column_args (all_columns,
