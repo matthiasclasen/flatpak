@@ -209,7 +209,7 @@ print_history (GPtrArray *dirs,
               if (*error)
                 return FALSE;
 
-              s = g_date_time_format (time, "%X");
+              s = g_date_time_format (time, "%b %e %T");
               flatpak_table_printer_add_column (printer, s);
             }
           else if (strcmp (columns[k].name, "change") == 0)
