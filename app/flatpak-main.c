@@ -158,14 +158,6 @@ GOptionEntry user_entries[] = {
 };
 
 static void
-no_message_handler (const gchar   *log_domain,
-                    GLogLevelFlags log_level,
-                    const gchar   *message,
-                    gpointer       user_data)
-{
-}
-
-static void
 message_handler (const gchar   *log_domain,
                  GLogLevelFlags log_level,
                  const gchar   *message,
@@ -263,17 +255,11 @@ flatpak_option_context_parse (GOptionContext     *context,
     {
       if (opt_verbose > 0)
         g_log_set_handler (G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, message_handler, NULL);
-      else
-        g_log_set_handler (G_LOG_DOMAIN, G_LOG_LEVEL_DEBUG, no_message_handler, NULL);
       if (opt_verbose > 1)
         g_log_set_handler (G_LOG_DOMAIN "2", G_LOG_LEVEL_DEBUG, message_handler, NULL);
-      else
-        g_log_set_handler (G_LOG_DOMAIN "2", G_LOG_LEVEL_DEBUG, no_message_handler, NULL);
 
       if (opt_ostree_verbose)
         g_log_set_handler ("OSTree", G_LOG_LEVEL_DEBUG, message_handler, NULL);
-      else
-        g_log_set_handler ("OSTree", G_LOG_LEVEL_DEBUG, no_message_handler, NULL);
     }
 
   if (opt_version)
@@ -588,7 +574,6 @@ main (int    argc,
   textdomain (GETTEXT_PACKAGE);
 
   g_log_set_handler (G_LOG_DOMAIN, G_LOG_LEVEL_MESSAGE | G_LOG_LEVEL_WARNING, message_handler, NULL);
-  g_log_set_writer_func (g_log_writer_journald, NULL, NULL);
 
   g_set_prgname (argv[0]);
 
