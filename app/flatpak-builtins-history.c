@@ -39,6 +39,21 @@ static GOptionEntry options[] = {
   { NULL }
 };
 
+static const char *
+dir_get_id (FlatpakDir *dir)
+{
+  const char *id;
+
+  if (flatpak_dir_is_user (dir))
+    return "user";
+
+  id = flatpak_dir_get_id (dir);
+  if (g_strcmp0 (id, "default") != 0)
+    return id ? id : "unknown";
+
+  return "system";
+}
+
 static gboolean
 print_history (GPtrArray *dirs,
                GCancellable *cancellable,
@@ -57,7 +72,6 @@ print_history (GPtrArray *dirs,
   flatpak_table_printer_set_column_title (printer, i++, _("Installation"));  
   flatpak_table_printer_set_column_title (printer, i++, _("Application"));  
   flatpak_table_printer_set_column_title (printer, i++, _("Branch"));  
-  flatpak_table_printer_set_column_title (printer, i++, _("Ref"));  
   flatpak_table_printer_set_column_title (printer, i++, _("Remote"));  
   flatpak_table_printer_set_column_title (printer, i++, _("Commit"));  
   flatpak_table_printer_set_column_title (printer, i++, _("Success"));  
@@ -103,6 +117,23 @@ print_history (GPtrArray *dirs,
                 }
             }
           fields[i].value = g_strdup (data + strlen (fields[i].name) + 1);
+        }
+
+      if (dirs)
+        {
+          gboolean include = FALSE;
+
+          for (i = 0; i < dirs->len; i++)
+            {
+              const char *id = dir_get_id (dirs->pdata[i]);
+              if (g_strcmp0 (id, fields[2].value) == 0)
+                {
+                  include = TRUE;
+                  break;
+                }
+            }
+          if (!include)
+            continue;
         }
 
       if (fields[0].value)
