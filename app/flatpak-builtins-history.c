@@ -24,6 +24,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/types.h>
+#include <pwd.h>
 
 #include <glib/gi18n.h>
 
@@ -61,6 +63,8 @@ static Column all_columns[] = {
   { "remote",       N_("Remote"),         N_("Show the remote"),                    1, 1 },
   { "commit",       N_("Commit"),         N_("Show the active commit"),             1, 0 },
   { "result",       N_("Result"),         N_("Show whether change was successful"), 1, 1 },
+  { "user",         N_("User"),           N_("Show the user doing the change"),     1, 0 },
+  { "tool",         N_("Tool"),           N_("Show the tool that was used"),        1, 0 },
   { NULL }
 };
 
@@ -145,8 +149,7 @@ print_history (GPtrArray *dirs,
       return FALSE;
     }
 
-  if ((r = sd_journal_add_match (j, "_COMM=flatpak", 0)) < 0 ||
-      (r = sd_journal_add_match (j, "MESSAGE_ID=" MESSAGE_TRANSACTION, 0)) < 0)
+  if ((r = sd_journal_add_match (j, "MESSAGE_ID=" MESSAGE_TRANSACTION, 0)) < 0)
     {
       g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to add match to journal: %s", strerror (-r));
       return FALSE;
@@ -254,6 +257,26 @@ print_history (GPtrArray *dirs,
                 flatpak_table_printer_add_column (printer, "✓");
               else
                 flatpak_table_printer_add_column (printer, "");
+            }
+          else if (strcmp (columns[k].name, "user") == 0)
+            {
+              g_autofree char *id = get_field (j, "_UID", error);
+              int uid;
+              struct passwd *pwd;
+
+              if (*error)
+                return FALSE;
+
+              uid = g_ascii_strtoll (id, NULL, 10);
+              pwd = getpwuid (uid);
+              flatpak_table_printer_add_column (printer, pwd ? pwd->pw_name : id);
+            }
+          else if (strcmp (columns[k].name, "tool") == 0)
+            {
+              g_autofree char *tool = get_field (j, "_COMM", error);
+              if (*error)
+                return FALSE;
+              flatpak_table_printer_add_column (printer, tool);
             }
         }
 
