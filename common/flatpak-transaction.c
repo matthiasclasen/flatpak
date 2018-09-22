@@ -1794,94 +1794,6 @@ flatpak_transaction_update_metadata (FlatpakTransaction *self,
   return TRUE;
 }
 
-static const char *
-installation_name (FlatpakTransaction *self)
-{
-  FlatpakTransactionPrivate *priv = flatpak_transaction_get_instance_private (self);
-  const char *id = NULL;
-
-  if (flatpak_installation_get_is_user (priv->installation))
-    return "user";
-
-  id = flatpak_installation_get_id (priv->installation);
-  if (g_strcmp0 (id, "default") != 0)
-    return id ? id : "unknown";
-
-  return "system";
-}
-
-static void
-log_structured (FlatpakTransaction *self,
-                FlatpakTransactionOperation *op,
-                GError *error,
-                int details,
-                const char *file,
-                const char *line,
-                const char *func)
-{
-  GLogField fields[] = {
-    { "MESSAGE_ID", MESSAGE_TRANSACTION, -1 },
-    { "GLIB_DOMAIN", G_LOG_DOMAIN, -1 },
-    { "PRIORITY", "5" /* Message */, -1 },
-    { "CODE_FILE", file, -1 },
-    { "CODE_LINE", line, -1 },
-    { "CODE_FUNC", func, -1 },
-    { "FLATPAK_VERSION", PACKAGE_VERSION, -1 },
-    { "MESSAGE", NULL , -1 },
-    { "OPERATION", kind_to_str (op->kind), -1 },
-    { "INSTALLATION", installation_name (self), -1 },
-    { "RESULT", error ? "0" : "1", -1 },
-    { NULL, NULL, -1 }, /* REMOTE */
-    { NULL, NULL, -1 }, /* REF */
-    { NULL, NULL, -1 }, /* COMMIT */
-  };
-
-  gsize n_fields;
-  g_autofree char *message = NULL;
-
-  if (error)
-    message = g_strdup_printf ("Operation failed: %s %s from %s: %s%s",
-                               kind_to_str (op->kind), op->ref, op->remote,
-                               error->message,
-                               (details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL)
-                               ? " (non-fatal)" : "");
-  else
-    message = g_strdup_printf ("Operation succeeded: %s %s from %s%s",
-                               kind_to_str (op->kind), op->ref, op->remote,
-                               (details & FLATPAK_TRANSACTION_RESULT_NO_CHANGE)
-                               ? " (no change)" : "");
-
-  fields[7].value = message;
-
-  n_fields = 11;
-
-  if (op->remote)
-    {
-      fields[n_fields].key = "REMOTE";
-      fields[n_fields].value = op->remote;
-      n_fields++;
-    }
-
-  if (op->ref)
-    {
-      fields[n_fields].key = "REF";
-      fields[n_fields].value = op->ref;
-      n_fields++;
-    }
-
-  if (op->resolved_commit)
-    {
-      fields[n_fields].key = "COMMIT";
-      fields[n_fields].value = op->resolved_commit;
-      n_fields++;
-    }
-
-  g_log_structured_array (G_LOG_LEVEL_MESSAGE, fields, n_fields);
-}
-
-#define log_operation(self, op, error, details) \
-  log_structured (self, op, error, details, __FILE__, G_STRINGIFY (__LINE__), G_STRFUNC);
-
 static void
 emit_new_op (FlatpakTransaction *self, FlatpakTransactionOperation *op, FlatpakTransactionProgress *progress)
 {
@@ -2759,7 +2671,7 @@ flatpak_transaction_run (FlatpakTransaction *self,
            * the app should still run, and otherwise you could never install the app until the runtime
            * remote is fixed. */
           !(op->fail_if_op_fails->kind == FLATPAK_TRANSACTION_OPERATION_UPDATE && g_str_has_prefix (op->ref, "app/")))
-        { 
+        {
           g_set_error (&local_error, FLATPAK_ERROR, FLATPAK_ERROR_SKIPPED,
                        _("Skipping %s due to previous error"), pref);
           res = FALSE;
@@ -2792,8 +2704,6 @@ flatpak_transaction_run (FlatpakTransaction *self,
           flatpak_transaction_progress_done (progress);
           if (res)
             {
-              log_operation (self, op, NULL, 0);
-
               emit_op_done (self, op, 0);
 
               /* Normally we don't need to prune after install, because it makes no old objects
@@ -2843,8 +2753,6 @@ flatpak_transaction_run (FlatpakTransaction *self,
 
               if (res)
                 {
-                  log_operation (self, op, NULL, result_details);
-
                   emit_op_done (self, op, result_details);
 
                   if (!priv->no_pull)
@@ -2871,8 +2779,6 @@ flatpak_transaction_run (FlatpakTransaction *self,
 
           if (res)
             {
-              log_operation (self, op, NULL, 0);
-
               emit_op_done (self, op, 0);
               needs_prune = TRUE;
               needs_triggers = TRUE;
@@ -2898,8 +2804,6 @@ flatpak_transaction_run (FlatpakTransaction *self,
 
           if (res)
             {
-              log_operation (self, op, NULL, 0);
-
               emit_op_done (self, op, 0);
               needs_prune = TRUE;
 
@@ -2935,8 +2839,6 @@ flatpak_transaction_run (FlatpakTransaction *self,
 
           if (op->non_fatal)
             error_details |= FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL;
-
-          log_operation (self, op, local_error, error_details);
 
           g_signal_emit (self, signals[OPERATION_ERROR], 0, op,
                          local_error, error_details,

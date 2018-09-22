@@ -705,4 +705,21 @@ gboolean flatpak_check_required_version (const char *ref,
                                          GKeyFile   *metakey,
                                          GError    **error);
 
+void  flatpak_log_change (const char *file,
+                          int line,
+                          const char *func,
+                          const char *change,
+                          const char *installation,
+                          const char *remote,
+                          const char *ref,
+                          const char *commit,
+                          gboolean success,
+                          const char *message,
+                          ...);
+
+#define flatpak_log_change(change,installation,remote,ref,commit,success,message,...) \
+    (flatpak_log_change) (__FILE__, __LINE__, __FUNCTION__, \
+                          change,installation,remote,ref,commit,success,message, \
+                          __VA_ARGS__)
+
 #endif /* __FLATPAK_UTILS_H__ */
