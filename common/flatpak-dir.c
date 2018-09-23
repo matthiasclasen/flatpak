@@ -4238,6 +4238,8 @@ flatpak_dir_pull_oci (FlatpakDir          *self,
   g_autofree char *latest_rev = NULL;
   G_GNUC_UNUSED g_autofree char *latest_commit =
     flatpak_dir_read_latest (self, state->remote_name, ref, &latest_alt_commit, cancellable, NULL);
+  g_autofree char *name = NULL;
+  int opid;
 
   /* We use the summary so that we can reuse any cached json */
   flatpak_remote_state_lookup_ref (state, ref, &latest_rev, &summary_element, error);
@@ -4308,6 +4310,19 @@ flatpak_dir_pull_oci (FlatpakDir          *self,
 
   g_debug ("Imported OCI image as checksum %s", checksum);
 
+  if (repo == self->repo)
+    name = flatpak_dir_get_name (self);
+  else
+    {
+      GFile *file = ostree_repo_get_path (repo);
+      name = g_file_get_path (file);
+    }
+
+  opid = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (self), "object-pid"));
+  flatpak_log_change ("pull oci", opid, name, registry_uri, ref, NULL,
+                      "Pulled %s from %s in %s",
+                      ref, registry_uri, name);
+
   return TRUE;
 }
 
@@ -4335,6 +4350,8 @@ flatpak_dir_pull (FlatpakDir                           *self,
   g_auto(OstreeRepoFinderResultv) allocated_results = NULL;
   const OstreeRepoFinderResult * const *results;
   g_auto(GLnxLockFile) lock = { 0, };
+  g_autofree char *name = NULL;
+  int opid;
 
   /* If @opt_results is set, @opt_rev must be. */
   g_return_val_if_fail (opt_results == NULL || opt_rev != NULL, FALSE);
@@ -4516,6 +4533,19 @@ flatpak_dir_pull (FlatpakDir                           *self,
 
   ret = TRUE;
 
+  if (repo == self->repo)
+    name = flatpak_dir_get_name (self);
+  else
+    {
+      GFile *file = ostree_repo_get_path (repo);
+      name = g_file_get_path (file);
+    }
+
+  opid = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (self), "object-pid"));
+  flatpak_log_change ("pull", opid, name, state->remote_name, ref, rev,
+                      "Pulled %s from %s in %s",
+                      ref, state->remote_name, name);
+
 out:
   if (!ret)
     ostree_repo_abort_transaction (repo, cancellable, NULL);
@@ -4653,6 +4683,8 @@ flatpak_dir_pull_untrusted_local (FlatpakDir          *self,
   g_autoptr(GPtrArray) subdirs_arg = NULL;
   g_auto(GLnxLockFile) lock = { 0, };
   gboolean ret = FALSE;
+  g_autofree char *name = NULL;
+  int opid;
 
   if (!flatpak_dir_ensure_repo (self, cancellable, error))
     return FALSE;
@@ -4880,6 +4912,11 @@ flatpak_dir_pull_untrusted_local (FlatpakDir          *self,
 
   ret = TRUE;
 
+  name = flatpak_dir_get_name (self);
+  opid = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (self), "object-pid"));
+  flatpak_log_change ("pull local", opid, name, src_path, ref, checksum,
+                      "Pulled %s from %s in %s",
+                      ref, src_path, name);
 out:
   if (!ret)
     ostree_repo_abort_transaction (self->repo, cancellable, NULL);
@@ -7076,6 +7113,9 @@ flatpak_dir_deploy_install (FlatpakDir   *self,
   g_autoptr(GError) local_error = NULL;
   g_auto(GStrv) ref_parts = g_strsplit (ref, "/", -1);
   g_autofree char *remove_ref_from_remote = NULL;
+  g_autofree char *name = NULL;
+  g_autofree char *commit = NULL;
+  int opid;
 
   if (!flatpak_dir_lock (self, &lock,
                          cancellable, error))
@@ -7158,6 +7198,13 @@ flatpak_dir_deploy_install (FlatpakDir   *self,
 
   ret = TRUE;
 
+  commit = flatpak_dir_read_active (self, ref, cancellable);
+  name = flatpak_dir_get_name (self);
+  opid = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (self), "object-pid"));
+  flatpak_log_change ("deploy install", opid, name, origin, ref, commit,
+                      "Installed %s from %s in %s",
+                      ref, origin, name);
+
 out:
   if (created_deploy_base && !ret)
     flatpak_rm_rf (deploy_base, cancellable, NULL);
@@ -7179,6 +7226,10 @@ flatpak_dir_deploy_update (FlatpakDir   *self,
   g_autofree const char **old_subpaths = NULL;
   g_autofree char *old_active = NULL;
   const char *old_origin;
+  gboolean res = FALSE;
+  g_autofree char *name = NULL;
+  int opid;
+  g_autofree char *commit = NULL;
 
   if (!flatpak_dir_lock (self, &lock,
                          cancellable, error))
@@ -7223,6 +7274,12 @@ flatpak_dir_deploy_update (FlatpakDir   *self,
     return FALSE;
 
   flatpak_dir_cleanup_removed (self, cancellable, NULL);
+
+  commit = flatpak_dir_read_active (self, ref, cancellable);
+  name = flatpak_dir_get_name (self);
+  opid = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (self), "object-pid"));
+  flatpak_log_change ("deploy update", opid, name, old_origin, ref, commit,
+                      "Updated %s from %s in %s", ref, old_origin, name);
 
   return TRUE;
 }
@@ -7427,7 +7484,6 @@ flatpak_dir_install (FlatpakDir          *self,
                      GError             **error)
 {
   FlatpakPullFlags flatpak_flags;
-  gboolean res = FALSE;
 
   flatpak_flags = FLATPAK_PULL_FLAGS_DOWNLOAD_EXTRA_DATA;
   if (no_static_deltas)
@@ -7456,11 +7512,11 @@ flatpak_dir_install (FlatpakDir          *self,
                                        state->remote_name,
                                        &url,
                                        error))
-        goto out;
+        return FALSE;
 
       if (!ostree_repo_remote_get_gpg_verify_summary (self->repo, state->remote_name,
                                                       &gpg_verify_summary, error))
-        goto out;
+        return FALSE;
 
       if (!ostree_repo_remote_get_gpg_verify (self->repo, state->remote_name,
                                               &gpg_verify, error))
@@ -7478,14 +7534,14 @@ flatpak_dir_install (FlatpakDir          *self,
 
           registry = flatpak_dir_create_system_child_oci_registry (self, &child_repo_lock, error);
           if (registry == NULL)
-            goto out;
+            return FALSE;
 
           registry_file = g_file_new_for_uri (flatpak_oci_registry_get_uri (registry));
 
           child_repo_path = g_file_get_path (registry_file);
 
           if (!flatpak_dir_mirror_oci (self, registry, state, ref, NULL, progress, cancellable, error))
-            goto out;
+            return FALSE;
         }
       else if ((!gpg_verify_summary && state->collection_id == NULL) || !gpg_verify)
         {
@@ -7501,10 +7557,7 @@ flatpak_dir_install (FlatpakDir          *self,
           if (g_str_has_prefix (url, "file:"))
             helper_flags |= FLATPAK_HELPER_DEPLOY_FLAGS_LOCAL_PULL;
           else
-            {
-              flatpak_fail (error, "Can't pull from untrusted non-gpg verified remote");
-              goto out;
-            }
+            return flatpak_fail (error, "Can't pull from untrusted non-gpg verified remote");
         }
       else
         {
@@ -7514,7 +7567,7 @@ flatpak_dir_install (FlatpakDir          *self,
 
           child_repo = flatpak_dir_create_system_child_repo (self, &child_repo_lock, NULL, error);
           if (child_repo == NULL)
-            goto out;
+            return FALSE;
 
           flatpak_flags |= FLATPAK_PULL_FLAGS_SIDELOAD_EXTRA_DATA;
 
@@ -7525,10 +7578,10 @@ flatpak_dir_install (FlatpakDir          *self,
                                  flatpak_flags,
                                  OSTREE_REPO_PULL_FLAGS_MIRROR,
                                  progress, cancellable, error))
-            goto out;
+            return FALSE;
 
           if (!child_repo_ensure_summary (child_repo, state, cancellable, error))
-            goto out;
+            return FALSE;
 
           child_repo_path = g_file_get_path (ostree_repo_get_path (child_repo));
         }
@@ -7546,12 +7599,11 @@ flatpak_dir_install (FlatpakDir          *self,
                                                   installation ? installation : "",
                                                   cancellable,
                                                   error))
-        goto out;
+        return FALSE;
 
       if (child_repo_path)
         (void) glnx_shutil_rm_rf_at (AT_FDCWD, child_repo_path, NULL, NULL);
 
-      /* system helper will log */
       return TRUE;
     }
 
@@ -7562,32 +7614,17 @@ flatpak_dir_install (FlatpakDir          *self,
       if (!flatpak_dir_pull (self, state, ref, opt_commit, NULL, opt_subpaths, NULL,
                              flatpak_flags, OSTREE_REPO_PULL_FLAGS_NONE,
                              progress, cancellable, error))
-        goto out;
+        return FALSE;
     }
 
   if (!no_deploy)
     {
       if (!flatpak_dir_deploy_install (self, ref, state->remote_name, opt_subpaths,
                                        reinstall, cancellable, error))
-        goto out;
+        return FALSE;
     }
 
-  res = TRUE;
-
-out:
-  {
-    g_autofree char *name = flatpak_dir_get_name (self);
-    if (res)
-      flatpak_log_change ("install", name, state->remote_name, ref, opt_commit, TRUE,
-                          "Installed %s from %s in %s",
-                          ref, state->remote_name, name);
-    else
-      flatpak_log_change ("install", name, state->remote_name, ref, opt_commit, FALSE,
-                          "Failed to install %s from %s in %s: %s",
-                          ref, state->remote_name, name, (*error)->message);
-  }
-
-  return res;
+  return TRUE;
 }
 
 char *
@@ -7757,7 +7794,6 @@ flatpak_dir_install_bundle (FlatpakDir   *self,
   g_auto(GStrv) parts = NULL;
   g_autofree char *to_checksum = NULL;
   gboolean gpg_verify;
-  gboolean res = FALSE;
 
   if (!flatpak_dir_check_add_remotes_config_dir (self, error))
     return FALSE;
@@ -7773,16 +7809,16 @@ flatpak_dir_install_bundle (FlatpakDir   *self,
                                                           &ref,
                                                           cancellable,
                                                           error))
-        goto out;
+        return FALSE;
 
       if (out_ref)
         *out_ref = g_steal_pointer (&ref);
 
-      return TRUE; /* system helper will log */
+      return TRUE;
     }
 
   if (!flatpak_dir_ensure_repo (self, cancellable, error))
-    goto out;
+    return FALSE;
 
   metadata = flatpak_bundle_load (file, &to_checksum,
                                   &ref,
@@ -7791,11 +7827,11 @@ flatpak_dir_install_bundle (FlatpakDir   *self,
                                   NULL, NULL, NULL,
                                   error);
   if (metadata == NULL)
-    goto out;
+    return FALSE;
 
   parts = flatpak_decompose_ref (ref, error);
   if (parts == NULL)
-    goto out;
+    return FALSE;
 
   deploy_data = flatpak_dir_get_deploy_data (self, ref, cancellable, NULL);
   if (deploy_data != NULL)
@@ -7804,20 +7840,20 @@ flatpak_dir_install_bundle (FlatpakDir   *self,
         {
           g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_ALREADY_INSTALLED,
                        _("This version of %s is already installed"), parts[1]);
-          goto out;
+          return FALSE;
         }
 
       if (strcmp (remote, flatpak_deploy_data_get_origin (deploy_data)) != 0)
         {
           g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        _("Can't change remote during bundle install"));
-          goto out;
+          return FALSE;
         }
     }
 
   if (!ostree_repo_remote_get_gpg_verify (self->repo, remote,
                                           &gpg_verify, error))
-    goto out;
+    return FALSE;
 
   if (!flatpak_pull_from_bundle (self->repo,
                                  file,
@@ -7826,7 +7862,7 @@ flatpak_dir_install_bundle (FlatpakDir   *self,
                                  gpg_verify,
                                  cancellable,
                                  error))
-    goto out;
+    return FALSE;
 
   if (deploy_data != NULL)
     {
@@ -7853,42 +7889,28 @@ flatpak_dir_install_bundle (FlatpakDir   *self,
         {
           if (!flatpak_dir_cleanup_remote_for_url_change (self, remote,
                                                           origin, cancellable, error))
-            goto out;
+            return FALSE;
 
           if (!ostree_repo_write_config (self->repo, new_config, error))
-            goto out;
+            return FALSE;
         }
     }
 
   if (deploy_data)
     {
       if (!flatpak_dir_deploy_update (self, ref, NULL, NULL, cancellable, error))
-        goto out;
+        return FALSE;
     }
   else
     {
       if (!flatpak_dir_deploy_install (self, ref, remote, NULL, FALSE, cancellable, error))
-        goto out;
+        return FALSE;
     }
 
   if (out_ref)
     *out_ref = g_steal_pointer (&ref);
 
-  res = TRUE;
-out:
-  {
-    g_autofree char *name = flatpak_dir_get_name (self);
-    g_autofree char *path = g_file_get_path (file);
-    if (res)
-      flatpak_log_change ("install bundle", name, remote, *out_ref, NULL, TRUE,
-                          "Installed %s from bundle %s in %s",
-                          ref, path, name);
-    else
-      flatpak_log_change ("install bundle", name, remote, *out_ref, NULL, FALSE,
-                          "Failed to install %s from bundle %s in %s: %s",
-                          ref, path, name, (*error)->message);
-  }
-  return res;
+  return TRUE;
 }
 
 static gboolean
@@ -8036,7 +8058,6 @@ flatpak_dir_update (FlatpakDir                           *self,
   FlatpakPullFlags flatpak_flags;
   g_autofree const char **old_subpaths = NULL;
   gboolean is_oci;
-  gboolean res = FALSE;
 
   /* This and @results are calculated in check_for_update. @results will be
    * %NULL if we don’t support collections. */
@@ -8060,7 +8081,7 @@ flatpak_dir_update (FlatpakDir                           *self,
     subpaths = old_subpaths;
 
   if (!ostree_repo_remote_get_url (self->repo, state->remote_name, &url, error))
-    goto out;
+    return FALSE;
 
   if (*url == 0)
     return TRUE; /* Empty URL => disabled */
@@ -8079,10 +8100,7 @@ flatpak_dir_update (FlatpakDir                           *self,
       gboolean gpg_verify;
 
       if (allow_downgrade)
-        {
-          flatpak_fail (error, "Can't update to a specific commit without root permissions");
-          goto out;
-        }
+        return flatpak_fail (error, "Can't update to a specific commit without root permissions");
 
       if (!OSTREE_CHECK_VERSION (2017, 13))
         {
@@ -8096,23 +8114,23 @@ flatpak_dir_update (FlatpakDir                           *self,
         }
 
       if (!flatpak_dir_ensure_repo (self, cancellable, error))
-        goto out;
+        return FALSE;
 
       if (!ostree_repo_remote_get_url (self->repo,
                                        state->remote_name,
                                        &url,
                                        error))
-        goto out;
+        return FALSE;
 
       helper_flags = FLATPAK_HELPER_DEPLOY_FLAGS_UPDATE;
 
       if (!ostree_repo_remote_get_gpg_verify_summary (self->repo, state->remote_name,
                                                       &gpg_verify_summary, error))
-        goto out;
+        return FALSE;
 
       if (!ostree_repo_remote_get_gpg_verify (self->repo, state->remote_name,
                                               &gpg_verify, error))
-        goto out;
+        return FALSE;
 
       if (no_pull)
         {
@@ -8131,10 +8149,7 @@ flatpak_dir_update (FlatpakDir                           *self,
           if (g_str_has_prefix (url, "file:"))
             helper_flags |= FLATPAK_HELPER_DEPLOY_FLAGS_LOCAL_PULL;
           else
-            {
-              flatpak_fail (error, "Can't pull from untrusted non-gpg verified remote");
-              goto out;
-            }
+            return flatpak_fail (error, "Can't pull from untrusted non-gpg verified remote");
         }
       else if (is_oci)
         {
@@ -8143,14 +8158,14 @@ flatpak_dir_update (FlatpakDir                           *self,
 
           registry = flatpak_dir_create_system_child_oci_registry (self, &child_repo_lock, error);
           if (registry == NULL)
-            goto out;
+            return FALSE;
 
           registry_file = g_file_new_for_uri (flatpak_oci_registry_get_uri (registry));
 
           child_repo_path = g_file_get_path (registry_file);
 
           if (!flatpak_dir_mirror_oci (self, registry, state, ref, NULL, progress, cancellable, error))
-            goto out;
+            return FALSE;
         }
       else
         {
@@ -8160,17 +8175,17 @@ flatpak_dir_update (FlatpakDir                           *self,
 
           child_repo = flatpak_dir_create_system_child_repo (self, &child_repo_lock, commit, error);
           if (child_repo == NULL)
-            goto out;
+            return FALSE;
 
           flatpak_flags |= FLATPAK_PULL_FLAGS_SIDELOAD_EXTRA_DATA;
           if (!flatpak_dir_pull (self, state, ref, commit, results, subpaths,
                                  child_repo,
                                  flatpak_flags, OSTREE_REPO_PULL_FLAGS_MIRROR,
                                  progress, cancellable, error))
-            goto out;
+            return FALSE;
 
           if (!child_repo_ensure_summary (child_repo, state, cancellable, error))
-            goto out;
+            return FALSE;
 
           child_repo_path = g_file_get_path (ostree_repo_get_path (child_repo));
         }
@@ -8185,12 +8200,12 @@ flatpak_dir_update (FlatpakDir                           *self,
                                                   installation ? installation : "",
                                                   cancellable,
                                                   error))
-        goto out;
+        return FALSE;
 
       if (child_repo_path)
         (void) glnx_shutil_rm_rf_at (AT_FDCWD, child_repo_path, NULL, NULL);
 
-      return TRUE; /* system helper will log */
+      return TRUE;
     }
 
   if (!no_pull)
@@ -8198,7 +8213,7 @@ flatpak_dir_update (FlatpakDir                           *self,
       if (!flatpak_dir_pull (self, state, ref, commit, results, subpaths,
                              NULL, flatpak_flags, OSTREE_REPO_PULL_FLAGS_NONE,
                              progress, cancellable, error))
-        goto out;
+        return FALSE;
     }
 
   if (!no_deploy)
@@ -8209,24 +8224,10 @@ flatpak_dir_update (FlatpakDir                           *self,
                                       is_oci ? NULL : commit,
                                       subpaths,
                                       cancellable, error))
-        goto out;
+        return FALSE;
     }
 
-  res = TRUE;
-
-out:
-  {
-    g_autofree char *name = flatpak_dir_get_name (self);
-    if (res)
-      flatpak_log_change ("update", name, state->remote_name, ref, commit, TRUE,
-                          "Updated %s from %s in %s",
-                          ref, state->remote_name, name);
-    else
-      flatpak_log_change ("update", name, state->remote_name, ref, commit, FALSE,
-                          "Failed to update %s from %s in %s: %s",
-                          ref, state->remote_name, name, (*error)->message);
-  }
-  return res;
+  return TRUE;
 }
 
 gboolean
@@ -8240,8 +8241,9 @@ flatpak_dir_uninstall (FlatpakDir                 *self,
   g_autofree char *current_ref = NULL;
   gboolean was_deployed;
   gboolean is_app;
-  const char *name;
-  gboolean res = FALSE;
+  const char *app;
+  g_autofree char *name = NULL;
+  int opid;
 
   g_auto(GStrv) parts = NULL;
   g_auto(GLnxLockFile) lock = { 0, };
@@ -8251,8 +8253,8 @@ flatpak_dir_uninstall (FlatpakDir                 *self,
 
   parts = flatpak_decompose_ref (ref, error);
   if (parts == NULL)
-    goto out;
-  name = parts[1];
+    return FALSE;
+  app = parts[1];
 
   if (flatpak_dir_use_system_helper (self, NULL))
     {
@@ -8262,23 +8264,23 @@ flatpak_dir_uninstall (FlatpakDir                 *self,
                                                      flags, ref,
                                                      installation ? installation : "",
                                                      cancellable, error))
-        goto out;
+        return FALSE;
 
-      return TRUE; /* system helper will log */
+      return TRUE;
     }
 
   if (!flatpak_dir_lock (self, &lock,
                          cancellable, error))
-    goto out;
+    return FALSE;
 
   deploy_data = flatpak_dir_get_deploy_data (self, ref,
                                              cancellable, error);
   if (deploy_data == NULL)
-    goto out;
+    return FALSE;
 
   repository = flatpak_deploy_data_get_origin (deploy_data);
   if (repository == NULL)
-    goto out;
+    return FALSE;
 
   if (g_str_has_prefix (ref, "runtime/") && !force_remove)
     {
@@ -8307,37 +8309,36 @@ flatpak_dir_uninstall (FlatpakDir                 *self,
       if (blocking->len > 1)
         {
           g_autofree char *joined = g_strjoinv (", ", (char **) blocking->pdata);
-          flatpak_fail (error, "Can't remove %s, it is needed for: %s", pref, joined);
-          goto out;
+          return flatpak_fail (error, "Can't remove %s, it is needed for: %s", pref, joined);
         }
     }
 
   g_debug ("dropping active ref");
   if (!flatpak_dir_set_active (self, ref, NULL, cancellable, error))
-    goto out;
+    return FALSE;
 
   is_app = g_str_has_prefix (ref, "app/");
   if (is_app)
     {
-      current_ref = flatpak_dir_current_ref (self, name, cancellable);
+      current_ref = flatpak_dir_current_ref (self, app, cancellable);
       if (g_strcmp0 (ref, current_ref) == 0)
         {
           g_debug ("dropping current ref");
-          if (!flatpak_dir_drop_current_ref (self, name, cancellable, error))
-            goto out;
+          if (!flatpak_dir_drop_current_ref (self, app, cancellable, error))
+            return FALSE;
         }
     }
 
   if (!flatpak_dir_undeploy_all (self, ref, force_remove, &was_deployed, cancellable, error))
-    goto out;
+    return FALSE;
 
   if (!keep_ref &&
       !flatpak_dir_remove_ref (self, repository, ref, cancellable, error))
-    goto out;
+    return FALSE;
 
   if (is_app &&
-      !flatpak_dir_update_exports (self, name, cancellable, error))
-    goto out;
+      !flatpak_dir_update_exports (self, app, cancellable, error))
+    return FALSE;
 
   glnx_release_lock_file (&lock);
 
@@ -8346,30 +8347,21 @@ flatpak_dir_uninstall (FlatpakDir                 *self,
   flatpak_dir_cleanup_removed (self, cancellable, NULL);
 
   if (!flatpak_dir_mark_changed (self, error))
-    goto out;
+    return FALSE;
 
   if (!was_deployed)
     {
       g_set_error (error, FLATPAK_ERROR, FLATPAK_ERROR_NOT_INSTALLED,
-                   _("%s branch %s is not installed"), name, parts[3]);
-      goto out;
+                   _("%s branch %s is not installed"), app, parts[3]);
+      return FALSE;
     }
 
-  res = TRUE;
+  name = flatpak_dir_get_name (self);
+  opid = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (self), "object-pid"));
+  flatpak_log_change ("uninstall", opid, name, NULL, ref, NULL,
+                      "Uninstalled %s in %s", ref, name);
 
-out:
-  {
-    g_autofree char *name = flatpak_dir_get_name (self);
-    if (res)
-      flatpak_log_change ("uninstall", name, NULL, ref, NULL, TRUE,
-                          "Uninstalled %s in %s", ref, name);
-    else
-      flatpak_log_change ("uninstall", name, NULL, ref, NULL, FALSE,
-                          "Failed to uninstall %s in %s: %s",
-                          ref, name, (*error)->message);
-  }
-
-  return res;
+  return TRUE;
 }
 
 gboolean
