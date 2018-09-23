@@ -64,7 +64,6 @@ static Column all_columns[] = {
   { "installation", N_("Installation"),   N_("Show the affected installation"),     1, 1 },
   { "remote",       N_("Remote"),         N_("Show the remote"),                    1, 1 },
   { "commit",       N_("Commit"),         N_("Show the active commit"),             1, 0 },
-  { "result",       N_("Result"),         N_("Show whether change was successful"), 1, 1 },
   { "user",         N_("User"),           N_("Show the user doing the change"),     1, 0 },
   { "tool",         N_("Tool"),           N_("Show the tool that was used"),        1, 0 },
   { "version",      N_("Version"),        N_("Show the Flatpak version"),           1, 0 },
@@ -174,14 +173,14 @@ print_history (GPtrArray *dirs,
           gboolean include = FALSE;
           g_autofree char *installation = get_field (j, "INSTALLATION", NULL);
 
-          for (i = 0; i < dirs->len; i++)
+          if (installation && installation[0] == '/')
+            include = TRUE; /* pull to a temp repo */
+
+          for (i = 0; i < dirs->len && !include; i++)
             {
               const char *id = dir_get_id (dirs->pdata[i]);
               if (g_strcmp0 (id, installation) == 0)
-                {
-                  include = TRUE;
-                  break;
-                }
+                include = TRUE;
             }
           if (!include)
             continue;
@@ -261,19 +260,10 @@ print_history (GPtrArray *dirs,
                 return FALSE;
               flatpak_table_printer_add_column_len (printer, commit, 12);
             }
-          else if (strcmp (columns[k].name, "result") == 0)
-            {
-              g_autofree char *result = get_field (j, "RESULT", error);
-              if (*error)
-                return FALSE;
-              if (g_strcmp0 (result, "0") != 0)
-                flatpak_table_printer_add_column (printer, "✓");
-              else
-                flatpak_table_printer_add_column (printer, "");
-            }
           else if (strcmp (columns[k].name, "user") == 0)
             {
               g_autofree char *id = get_field (j, "_UID", error);
+              g_autofree char *oid = NULL;
               int uid;
               struct passwd *pwd;
 
@@ -282,14 +272,46 @@ print_history (GPtrArray *dirs,
 
               uid = g_ascii_strtoll (id, NULL, 10);
               pwd = getpwuid (uid);
-              flatpak_table_printer_add_column (printer, pwd ? pwd->pw_name : id);
+              if (pwd)
+                {
+                  g_free (id);
+                  id = g_strdup (pwd->pw_name);
+                }
+
+              oid = get_field (j, "OBJECT_UID", NULL);
+              if (oid)
+                {
+                  /* flatpak-system-helper acting on behalf of sb else */
+                  g_autofree char *str = NULL;
+                  uid = g_ascii_strtoll (oid, NULL, 10);
+                  pwd = getpwuid (uid);
+                  str = g_strdup_printf ("%s (%s)", id, pwd ? pwd->pw_name : oid); 
+                  flatpak_table_printer_add_column (printer, str);
+                }
+              else
+                flatpak_table_printer_add_column (printer, id);
             }
           else if (strcmp (columns[k].name, "tool") == 0)
             {
-              g_autofree char *tool = get_field (j, "_COMM", error);
+              g_autofree char *exe = get_field (j, "_EXE", error);
+              g_autofree char *oexe = NULL;
+              g_autofree char *tool = NULL;
               if (*error)
                 return FALSE;
-              flatpak_table_printer_add_column (printer, tool);
+              tool = g_path_get_basename (exe);
+              oexe = get_field (j, "OBJECT_EXE", NULL);
+              if (oexe)
+                {
+                  /* flatpak-system-helper acting on behalf of sb else */
+                  g_autofree char *otool = NULL;
+                  g_autofree char *str = NULL;
+
+                  otool = g_path_get_basename (oexe);
+                  str = g_strdup_printf ("%s (%s)", tool, otool);
+                  flatpak_table_printer_add_column (printer, str);
+                }
+              else
+                flatpak_table_printer_add_column (printer, tool);
             }
           else if (strcmp (columns[k].name, "version") == 0)
             {
