@@ -5798,11 +5798,11 @@ void
                       int line,
                       const char *func,
                       const char *change,
+                      int opid,
                       const char *installation,
                       const char *remote,
                       const char *ref,
                       const char *commit,
-                      gboolean success,
                       const char *format,
                       ...)
 {
@@ -5810,26 +5810,39 @@ void
 
   char message[1024];
   va_list args;
-  
+
   va_start (args, format);
   g_vsnprintf (message, sizeof (message), format, args);
   va_end (args);
 
-g_print ("logging %s\n", message);
-
-  sd_journal_send ("MESSAGE_ID=" MESSAGE_TRANSACTION,
-                   "PRIORITY=5",
-                   "FLATPAK_VERSION=" PACKAGE_VERSION,
-                   "CODE_FILE=%s", file,
-                   "CODE_LINE=%d", line,
-                   "CODE_FUNC=%s", func,
-                   "INSTALLATION=%s", installation,
-                   "OPERATION=%s", change,
-                   "REMOTE=%s", remote ? remote : "",
-                   "REF=%s", ref ? ref : "",
-                   "COMMIT=%s", commit ? commit : "",
-                   "RESULT=%d", success,
-                   "MESSAGE=%s", message,
-                   NULL);
+  if (opid)
+    sd_journal_send ("MESSAGE_ID=" MESSAGE_TRANSACTION,
+                     "PRIORITY=5",
+                     "FLATPAK_VERSION=" PACKAGE_VERSION,
+                     "OBJECT_PID=%d", opid,
+                     "CODE_FILE=%s", file,
+                     "CODE_LINE=%d", line,
+                     "CODE_FUNC=%s", func,
+                     "INSTALLATION=%s", installation ? installation : "",
+                     "OPERATION=%s", change,
+                     "REMOTE=%s", remote ? remote : "",
+                     "REF=%s", ref ? ref : "",
+                     "COMMIT=%s", commit ? commit : "",
+                     "MESSAGE=%s", message,
+                     NULL);
+  else
+    sd_journal_send ("MESSAGE_ID=" MESSAGE_TRANSACTION,
+                     "PRIORITY=5",
+                     "FLATPAK_VERSION=" PACKAGE_VERSION,
+                     "CODE_FILE=%s", file,
+                     "CODE_LINE=%d", line,
+                     "CODE_FUNC=%s", func,
+                     "INSTALLATION=%s", installation,
+                     "OPERATION=%s", change,
+                     "REMOTE=%s", remote ? remote : "",
+                     "REF=%s", ref ? ref : "",
+                     "COMMIT=%s", commit ? commit : "",
+                     "MESSAGE=%s", message,
+                     NULL);
 #endif
 }

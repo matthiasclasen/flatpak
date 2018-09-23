@@ -709,17 +709,17 @@ void  flatpak_log_change (const char *file,
                           int line,
                           const char *func,
                           const char *change,
+                          int opid,
                           const char *installation,
                           const char *remote,
                           const char *ref,
                           const char *commit,
-                          gboolean success,
                           const char *message,
                           ...);
 
-#define flatpak_log_change(change,installation,remote,ref,commit,success,message,...) \
+#define flatpak_log_change(change,opid,installation,remote,ref,commit,message,...) \
     (flatpak_log_change) (__FILE__, __LINE__, __FUNCTION__, \
-                          change,installation,remote,ref,commit,success,message, \
+                          change,opid,installation,remote,ref,commit,message, \
                           __VA_ARGS__)
 
 #endif /* __FLATPAK_UTILS_H__ */
