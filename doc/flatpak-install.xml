@@ -69,7 +69,7 @@
             except ID are optional and can be left out, including the slashes,
             so most of the time you need only specify ID. Any part left out will be matched
             against what is in the remote, and if there are multiple matches you will be
-            prompted to choose from them. You will also be prompted with choices if
+            prompted to choose one of them. You will also be prompted with choices if
             <arg choice="plain">REF</arg> doesn't match anything in the remote exactly but is
             similar to one or more refs in the remote (e.g. "devhelp" is similar to
             "org.gnome.Devhelp").
