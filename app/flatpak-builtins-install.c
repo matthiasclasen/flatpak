@@ -375,7 +375,7 @@ flatpak_builtin_install (int argc, char **argv, GCancellable *cancellable, GErro
                       if (!opt_yes &&
                           !flatpak_yes_no_prompt (TRUE, /* default to yes on Enter */
                                                   _("Found ref ‘%s’ in remote ‘%s’ (%s). Is that the remote you want to use?"),
-                                                  argv[1], this_remote, flatpak_dir_get_name (dir_with_remote)))
+                                                  refs[0], this_remote, flatpak_dir_get_name (dir_with_remote)))
                         return flatpak_fail (error, _("Remote ‘%s’ not confirmed as correct"), this_remote);
 
                       remote = g_strdup (this_remote);
