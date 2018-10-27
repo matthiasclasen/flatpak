@@ -374,9 +374,9 @@ flatpak_builtin_install (int argc, char **argv, GCancellable *cancellable, GErro
 
                       if (!opt_yes &&
                           !flatpak_yes_no_prompt (TRUE, /* default to yes on Enter */
-                                                  _("Found ref ‘%s’ in remote ‘%s’ (%s). Is that the remote you want to use?"),
-                                                  refs[0], this_remote, flatpak_dir_get_name (dir_with_remote)))
-                        return flatpak_fail (error, _("Remote ‘%s’ not confirmed as correct"), this_remote);
+                                                  _("Found refs similar to ‘%s’ in remote ‘%s’ (%s).\nIs that the remote you want to use?"),
+                                                  argv[1], this_remote, flatpak_dir_get_name (dir_with_remote)))
+                        continue;
 
                       remote = g_strdup (this_remote);
                       dir = dir_with_remote;
@@ -390,7 +390,7 @@ flatpak_builtin_install (int argc, char **argv, GCancellable *cancellable, GErro
             }
 
             if (remote == NULL)
-              return flatpak_fail (error, _("No remote found with ref ‘%s’"), argv[1]);
+              return flatpak_fail (error, _("No remote selected to resolve matches for ‘%s’"), argv[1]);
         }
     }
 
