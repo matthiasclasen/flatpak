@@ -989,3 +989,33 @@ ellipsize_string (const char *text, int len)
 
   return ret;
 }
+
+const char *
+as_app_get_localized_name (AsApp *app)
+{
+  const char * const * languages = g_get_language_names ();
+  gsize i;
+
+  for (i = 0; languages[i]; ++i)
+    {
+      const char *name = as_app_get_name (app, languages[i]);
+      if (name != NULL)
+        return name;
+    }
+  return NULL;
+}
+
+const char *
+as_app_get_localized_comment (AsApp *app)
+{
+  const char * const * languages = g_get_language_names ();
+  gsize i;
+
+  for (i = 0; languages[i]; ++i)
+    {
+      const char *comment = as_app_get_comment (app, languages[i]);
+      if (comment != NULL)
+        return comment;
+    }
+  return NULL;
+}

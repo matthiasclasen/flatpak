@@ -128,4 +128,7 @@ Column *handle_column_args (Column *all_columns,
 char *  format_timestamp (guint64 timestamp);
 char *  ellipsize_string (const char *text, int len);
 
+const char *as_app_get_localized_name (AsApp *app);
+const char *as_app_get_localized_comment (AsApp *app);
+
 #endif /* __FLATPAK_BUILTINS_UTILS_H__ */
