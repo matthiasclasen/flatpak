@@ -54,15 +54,17 @@ static GOptionEntry options[] = {
 };
 
 static Column all_columns[] = {
-  { "application",  N_("Application"),    N_("Show the application ID"), 0, 0 },
+  { "description",  N_("Description"),    N_("Show the description"),    1, 1 },
+  { "application",  N_("Application"),    N_("Show the application ID"), 0, 1 },
   { "arch",         N_("Architecture"),   N_("Show the architecture"),   0, 0 },
-  { "branch",       N_("Branch"),         N_("Show the branch"),         0, 0 },
-  { "ref",          N_("Ref"),            N_("Show the ref"),            1, 1 },
-  { "origin",       N_("Origin"),         N_("Show the origin remote"),  1, 0 },
+  { "branch",       N_("Branch"),         N_("Show the branch"),         0, 1 },
+  { "ref",          N_("Ref"),            N_("Show the ref"),            1, 0 },
+  { "origin",       N_("Origin"),         N_("Show the origin remote"),  1, 1 },
+  { "installation", N_("Installation"),   N_("Show the installation"),   1, 0 },
   { "active",       N_("Active commit"),  N_("Show the active commit"),  1, 0 },
   { "latest",       N_("Latest commit"),  N_("Show the latest commit"),  1, 0 },
   { "size",         N_("Installed size"), N_("Show the installed size"), 1, 0 },
-  { "options",      N_("Options"),        N_("Show options"),            1, 1 },
+  { "options",      N_("Options"),        N_("Show options"),            1, 0 },
   { NULL }
 };
 
@@ -153,11 +155,14 @@ print_table_for_refs (gboolean print_apps,
   g_autofree char *match_id = NULL;
   g_autofree char *match_arch = NULL;
   g_autofree char *match_branch = NULL;
+  int rows, cols;
+  int ellip;
 
   if (columns[0].name == NULL)
     return TRUE;
 
   printer = flatpak_table_printer_new ();
+
   flatpak_table_printer_set_column_titles (printer, columns);
 
   if (app_runtime)
@@ -174,6 +179,9 @@ print_table_for_refs (gboolean print_apps,
       g_auto(GStrv) dir_refs = NULL;
       g_autoptr(GHashTable) pref_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
       int j;
+      g_autoptr(GHashTable) stores = NULL;
+
+      stores = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_object_unref);
 
       refs_data = (RefsData *) g_ptr_array_index (refs_array, i);
       dir = refs_data->dir;
@@ -267,7 +275,36 @@ print_table_for_refs (gboolean print_apps,
 
 	  for (k = 0; columns[k].name; k++)
             {
-              if (strcmp (columns[k].name, "ref") == 0)
+              if (strcmp (columns[k].name, "description") == 0)
+                {
+                  AsStore *store = (AsStore *) g_hash_table_lookup (stores, repo);
+                  AsApp *app;
+                  g_autofree char *description = NULL;
+
+                  if (store == NULL)
+                    {
+                      store = as_store_new ();
+#if AS_CHECK_VERSION (0, 6, 1)
+                      // We want to see multiple versions/branches of same app-id's, e.g. org.gnome.Platform
+                      as_store_set_add_flags (store, as_store_get_add_flags (store) | AS_STORE_ADD_FLAG_USE_UNIQUE_ID);
+#endif
+                      flatpak_dir_load_appstream_store (dir, repo, NULL, store, NULL, NULL);
+                      g_hash_table_insert (stores, g_strdup (repo), store);
+                    }
+
+                  app = as_store_get_app_by_id (store, parts[1]);
+                  if (app)
+                    {
+                      const char *name = as_app_get_localized_name (app);
+                      const char *comment = as_app_get_localized_comment (app);
+                      description = g_strconcat (name, " - ", comment, NULL);
+                    }
+
+                  flatpak_table_printer_add_column (printer, description);
+                }
+              else if (strcmp (columns[k].name, "installation") == 0)
+                flatpak_table_printer_add_column (printer, flatpak_dir_get_name_cached (dir));
+              else if (strcmp (columns[k].name, "ref") == 0)
                 flatpak_table_printer_add_column (printer, partial_ref);
               else if (strcmp (columns[k].name, "application") == 0)
                 flatpak_table_printer_add_column (printer, parts[1]);
@@ -334,7 +371,11 @@ print_table_for_refs (gboolean print_apps,
         }
     }
 
-  flatpak_table_printer_print (printer);
+  flatpak_get_window_size (&rows, &cols);
+  ellip = find_column (columns, "description", NULL);
+  flatpak_table_printer_set_column_ellipsize (printer, ellip, TRUE);
+  flatpak_table_printer_print_full (printer, 0, cols, NULL, NULL);
+
   flatpak_table_printer_free (printer);
 
   return TRUE;

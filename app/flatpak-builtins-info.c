@@ -79,6 +79,28 @@ maybe_print_space (gboolean *first)
     g_print (" ");
 }
 
+static void
+load_store_for_deployed (AsStore *store,
+                         FlatpakDeploy *deploy)
+{
+  g_autoptr(GFile) files = NULL;
+  g_autofree char *dir = NULL;
+  g_autofree char *appdata = NULL;
+  g_autofree char *metainfo = NULL;
+
+  files = flatpak_deploy_get_files (deploy);
+  dir = g_file_get_path (files);
+
+  /* unfortunately, we have to look in two places, and not
+   * guarantees for the filename either
+   */
+  appdata = g_build_filename (dir, "share", "appdata", NULL);
+  metainfo = g_build_filename (dir, "share", "metainfo", NULL);
+
+  as_store_load_path (store, appdata, NULL, NULL);
+  as_store_load_path (store, metainfo, NULL, NULL);
+}
+
 gboolean
 flatpak_builtin_info (int argc, char **argv, GCancellable *cancellable, GError **error)
 {
@@ -183,10 +205,11 @@ flatpak_builtin_info (int argc, char **argv, GCancellable *cancellable, GError *
       int len;
       int rows, cols;
       int width;
-      g_autoptr(AsStore) store = as_store_new ();
-      AsApp *app = NULL;
+      g_autoptr(AsStore) store = NULL;
+      AsApp *app;
 
-      flatpak_dir_load_appstream_store (dir, origin, parts[2], store, NULL, NULL);
+      store = as_store_new ();
+      load_store_for_deployed (store, deploy);
       app = as_store_get_app_by_id (store, parts[1]);
       if (app)
         {
