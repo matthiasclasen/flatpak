@@ -229,15 +229,20 @@ collect_exports (GFile          *base,
   g_autoptr(GFile) files = NULL;
   g_autoptr(GFile) export = NULL;
   int i;
-  const char *paths[] = {
-    "share/applications",                 /* Copy desktop files */
-    "share/mime/packages",                /* Copy MIME Type files */
-    "share/icons",                        /* Icons */
-    "share/dbus-1/services",              /* D-Bus service files */
-    "share/gnome-shell/search-providers", /* Search providers */
-    NULL,
+  struct {
+    const char *src;
+    const char *dest;
+  } paths[] = {
+    { "share/applications", NULL },         /* Copy desktop files */
+    { "share/mime/packages", NULL },        /* Copy MIME Type files */
+    { "share/icons", NULL },                /* Icons */
+    { "share/dbus-1/services", NULL },      /* D-Bus service files */
+    { "share/gnome-shell/search-providers",
+      NULL },                               /* Search providers */
+    { "share/gnome/autostart",
+      "share/flatpak/autostart" },          /* Autostart files*/
+    { NULL, NULL }
   };
-
 
   files = g_file_get_child (base, "files");
 
@@ -249,32 +254,33 @@ collect_exports (GFile          *base,
   if (opt_no_exports)
     return TRUE;
 
-  for (i = 0; paths[i]; i++)
+  for (i = 0; paths[i].src; i++)
     {
-      const char * path = paths[i];
-      g_autoptr(GFile) src = g_file_resolve_relative_path (files, path);
+      const char *src_path = paths[i].src;
+      const char *dest_path = paths[i].dest ? paths[i].dest : paths[i].src;
+      g_autoptr(GFile) src = g_file_resolve_relative_path (files, src_path);
       g_auto(GStrv) allowed_prefixes = NULL;
       g_auto(GStrv) allowed_extensions = NULL;
       gboolean require_exact_match = FALSE;
 
-      if (!flatpak_get_allowed_exports (path, app_id, arg_context,
+      if (!flatpak_get_allowed_exports (src_path, app_id, arg_context,
                                         &allowed_extensions, &allowed_prefixes, &require_exact_match))
-        return flatpak_fail (error, "Unexpectedly not allowed to export %s", path);
+        return flatpak_fail (error, "Unexpectedly not allowed to export %s", src_path);
 
       if (g_file_query_exists (src, cancellable))
         {
-          g_debug ("Exporting from %s", path);
+          g_debug ("Exporting from %s", src_path);
           g_autoptr(GFile) dest = NULL;
           g_autoptr(GFile) dest_parent = NULL;
-          dest = g_file_resolve_relative_path (export, path);
+          dest = g_file_resolve_relative_path (export, dest_path);
           dest_parent = g_file_get_parent (dest);
-          g_debug ("Ensuring export/%s parent exists", path);
+          g_debug ("Ensuring export/%s parent exists", dest_path);
           if (!flatpak_mkdir_p (dest_parent, cancellable, error))
             return FALSE;
-          g_debug ("Copying from files/%s", path);
+          g_debug ("Copying from files/%s", src_path);
           if (!copy_exports (src,
                              dest,
-                             path,
+                             src_path,
                              allowed_prefixes,
                              allowed_extensions,
                              require_exact_match,
@@ -285,6 +291,7 @@ collect_exports (GFile          *base,
     }
 
   g_assert_no_error (*error);
+
   return TRUE;
 }
 
